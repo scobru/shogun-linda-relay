@@ -1,0 +1,32 @@
+{
+  "name": "linda-optimization-server",
+  "version": "1.0.0",
+  "description": "Server unificato per ottimizzazioni Linda: username index e message cache",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": [
+    "linda",
+    "gundb",
+    "optimization",
+    "cache"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "fuse.js": "^6.6.2",
+    "gun": "^0.2020.1235",
+    "helmet": "^7.0.0",
+    "node-cron": "^3.0.2",
+    "shogun-core": "^3.1.0",
+    "sqlite3": "^5.1.6"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
