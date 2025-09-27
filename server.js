@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 8765;
 app.use(helmet());
 app.use(compression());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'https://linda.shogun-eco.xyz/',
+  origin: process.env.FRONTEND_URL || 'https://linda.shogun-eco.xyz',
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
@@ -643,7 +643,7 @@ function cleanupOldData() {
 // ============================================================================
 
 // Health check
-app.get('/health', (req, res) => {
+app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: Date.now(),
@@ -709,6 +709,16 @@ app.get('/api/search/:username', async (req, res) => {
       error: 'Internal server error'
     });
   }
+});
+
+app.get('/', async (req, res) => {
+  // pus message ina div
+  res.send(`
+    <div>
+      <h1>Shogun Linda Relay</h1>
+      <p>This is the Shogun Linda Relay</p>
+    </div>
+  `);
 });
 
 // Ricerca per public key
