@@ -8,7 +8,7 @@ const Fuse = require('fuse.js');
 const cron = require('node-cron');
 
 const app = express();
-const PORT = process.env.PORT || 8766;
+const PORT = process.env.PORT || 8765;
 
 // Middleware
 app.use(helmet());
