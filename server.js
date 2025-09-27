@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 8766;
 app.use(helmet());
 app.use(compression());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: process.env.FRONTEND_URL || 'https://linda.shogun-eco.xyz/',
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
