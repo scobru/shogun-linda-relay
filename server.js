@@ -148,6 +148,19 @@ async function initDatabase() {
         )
       `);
       
+      // Group encrypted keys table
+      db.run(`
+        CREATE TABLE IF NOT EXISTS group_encrypted_keys (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_id TEXT NOT NULL,
+          message_id TEXT NOT NULL,
+          user_pub TEXT NOT NULL,
+          encrypted_key TEXT NOT NULL,
+          timestamp INTEGER DEFAULT (strftime('%s', 'now')),
+          UNIQUE(group_id, message_id, user_pub)
+        )
+      `);
+      
       // Indexes for performance
       db.run(`CREATE INDEX IF NOT EXISTS idx_username ON usernames(username)`);
       db.run(`CREATE INDEX IF NOT EXISTS idx_display_name ON usernames(display_name)`);
@@ -158,6 +171,9 @@ async function initDatabase() {
       db.run(`CREATE INDEX IF NOT EXISTS idx_group_members_user_pub ON group_members(user_pub)`);
       db.run(`CREATE INDEX IF NOT EXISTS idx_group_messages_group_id ON group_messages(group_id)`);
       db.run(`CREATE INDEX IF NOT EXISTS idx_group_messages_timestamp ON group_messages(timestamp)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_group_encrypted_keys_group_id ON group_encrypted_keys(group_id)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_group_encrypted_keys_message_id ON group_encrypted_keys(message_id)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_group_encrypted_keys_user_pub ON group_encrypted_keys(user_pub)`);
       
       // Load data into memory
       loadUsernamesFromDB();
@@ -522,7 +538,7 @@ app.get('/api/users/:userPub/groups', async (req, res) => {
 app.post('/api/groups/:groupId/messages', async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { messageId, fromUser, content, timestamp, isEncrypted = false, signature } = req.body;
+    const { messageId, fromUser, content, timestamp, isEncrypted = false, signature, encryptedKeys } = req.body;
     
     if (!messageId || !fromUser || !content) {
       return res.status(400).json({
@@ -550,10 +566,51 @@ app.post('/api/groups/:groupId/messages', async (req, res) => {
         WHERE group_id = ?
       `, [timestamp || Date.now(), groupId]);
 
-      res.json({
-        success: true,
-        message: 'Message saved successfully'
-      });
+      // Save encrypted keys if provided
+      if (encryptedKeys && typeof encryptedKeys === 'object') {
+        const keyEntries = Object.entries(encryptedKeys);
+        let completedKeys = 0;
+        let hasError = false;
+
+        if (keyEntries.length === 0) {
+          return res.json({
+            success: true,
+            message: 'Message saved successfully'
+          });
+        }
+
+        keyEntries.forEach(([userPub, encryptedKey]) => {
+          db.run(`
+            INSERT OR REPLACE INTO group_encrypted_keys (group_id, message_id, user_pub, encrypted_key, timestamp)
+            VALUES (?, ?, ?, ?, ?)
+          `, [groupId, messageId, userPub, encryptedKey, Date.now()], (err) => {
+            if (err) {
+              console.error('❌ Failed to save encrypted key:', err);
+              hasError = true;
+            }
+            
+            completedKeys++;
+            if (completedKeys === keyEntries.length) {
+              if (hasError) {
+                return res.status(500).json({
+                  success: false,
+                  error: 'Failed to save some encrypted keys'
+                });
+              }
+              
+              res.json({
+                success: true,
+                message: 'Message and encrypted keys saved successfully'
+              });
+            }
+          });
+        });
+      } else {
+        res.json({
+          success: true,
+          message: 'Message saved successfully'
+        });
+      }
     });
   } catch (error) {
     console.error('❌ Save message error:', error);
@@ -598,6 +655,53 @@ app.get('/api/groups/:groupId/messages', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Get messages error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Get encrypted keys for a message
+app.get('/api/groups/:groupId/messages/:messageId/keys', async (req, res) => {
+  try {
+    const { groupId, messageId } = req.params;
+    const { userPub } = req.query;
+    
+    let query = `
+      SELECT user_pub, encrypted_key, timestamp 
+      FROM group_encrypted_keys 
+      WHERE group_id = ? AND message_id = ?
+    `;
+    let params = [groupId, messageId];
+    
+    // If userPub is specified, only get keys for that user
+    if (userPub) {
+      query += ' AND user_pub = ?';
+      params.push(userPub);
+    }
+    
+    db.all(query, params, (err, keys) => {
+      if (err) {
+        console.error('❌ Failed to get encrypted keys:', err);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to get encrypted keys'
+        });
+      }
+
+      const encryptedKeys = {};
+      keys.forEach(key => {
+        encryptedKeys[key.user_pub] = key.encrypted_key;
+      });
+
+      res.json({
+        success: true,
+        encryptedKeys
+      });
+    });
+  } catch (error) {
+    console.error('❌ Get encrypted keys error:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error'
