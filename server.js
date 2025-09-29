@@ -113,7 +113,17 @@ async function initDatabase() {
       `);
       
       // Add epub column if it doesn't exist (for existing databases)
-      db.run(`ALTER TABLE usernames ADD COLUMN epub TEXT`);
+      db.run(`ALTER TABLE usernames ADD COLUMN epub TEXT`, (err) => {
+        if (err) {
+          if (err.message.includes('duplicate column name')) {
+            console.log('✅ Epub column already exists in usernames table');
+          } else {
+            console.error('❌ Error adding epub column:', err);
+          }
+        } else {
+          console.log('✅ Added epub column to usernames table');
+        }
+      });
       
       
       // Indexes for performance
