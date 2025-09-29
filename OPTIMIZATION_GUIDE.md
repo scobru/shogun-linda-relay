@@ -19,33 +19,7 @@ Client (React) ←→ Optimization Server (SQLite Cache) ←→ GunDB (Storage F
 
 ## Tipi di Ottimizzazione
 
-### 1. Chat di Gruppo
-
-#### API Disponibili:
-- `GET /api/groups/:userPub` - Ottieni tutti i gruppi di un utente
-- `GET /api/groups/:groupId/messages` - Ottieni messaggi di un gruppo (con cache)
-- `POST /api/groups` - Crea un nuovo gruppo
-- `POST /api/groups/:groupId/messages` - Salva un messaggio di gruppo
-
-#### Ottimizzazioni:
-- **Cache automatica**: I messaggi vengono cachati automaticamente quando viene creato un gruppo
-- **Sincronizzazione real-time**: Il server ascolta GunDB e aggiorna la cache automaticamente
-- **Chiavi di crittografia**: Le chiavi criptate vengono salvate per supportare la decrittazione
-
-#### Utilizzo nel Client:
-```typescript
-// Prima prova a ottenere dal server di ottimizzazione
-const response = await fetch(`http://localhost:3001/api/groups/${groupId}/messages`);
-if (response.ok) {
-  const data = await response.json();
-  return data.messages; // Messaggi già cachati e ottimizzati
-}
-
-// Fallback a GunDB diretto
-return await lindaLib.getGroupMessages(groupId);
-```
-
-### 2. Room Pubbliche
+### 1. Room Pubbliche
 
 #### API Disponibili:
 - `GET /api/room/:roomId` - Ottieni messaggi di una room (con cache)
@@ -105,7 +79,6 @@ if (response.ok) {
 #### Tipi di Ricerca:
 - `all` - Cerca in tutti i tipi di messaggi
 - `private` - Solo chat private
-- `group` - Solo chat di gruppo
 - `room` - Solo room pubbliche
 
 #### Utilizzo:
@@ -122,7 +95,7 @@ console.log(`Trovati ${data.total} messaggi contenenti "ciao"`);
 
 #### Statistiche Disponibili:
 - Numero totale di messaggi
-- Numero di contatti/gruppi/room
+- Numero di contatti/room
 - Ultima attività
 - Messaggi criptati vs non criptati
 
@@ -166,7 +139,7 @@ const CONFIG = {
 
 ```typescript
 // useOptimizedMessages.ts
-export function useOptimizedMessages(type: 'group' | 'room' | 'private', id: string) {
+export function useOptimizedMessages(type: 'room' | 'private', id: string) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [cached, setCached] = useState(false);
