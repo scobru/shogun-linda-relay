@@ -24,6 +24,7 @@
     "helmet": "^7.0.0",
     "node-cron": "^3.0.2",
     "shogun-core": "^3.1.0",
+    "socket.io": "^4.7.4",
     "sqlite3": "^5.1.6"
   },
   "devDependencies": {

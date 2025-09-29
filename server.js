@@ -5,8 +5,17 @@ const compression = require('compression');
 const sqlite3 = require('sqlite3').verbose();
 const { ShogunCore } = require('shogun-core');
 const Fuse = require('fuse.js');
+const { Server } = require('socket.io');
+const http = require('http');
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
 const PORT = process.env.PORT || 8765;
 
 // Middleware
@@ -97,10 +106,14 @@ async function initDatabase() {
           username TEXT UNIQUE NOT NULL,
           display_name TEXT,
           user_pub TEXT NOT NULL,
+          epub TEXT,
           last_seen INTEGER,
           created_at INTEGER DEFAULT (strftime('%s', 'now'))
         )
       `);
+      
+      // Add epub column if it doesn't exist (for existing databases)
+      db.run(`ALTER TABLE usernames ADD COLUMN epub TEXT`);
       
       
       // Indexes for performance
@@ -134,6 +147,7 @@ function loadUsernamesFromDB() {
         username: row.username,
         displayName: row.display_name || row.username,
         pub: row.user_pub,
+        epub: row.epub,
         lastSeen: row.last_seen || Date.now()
       });
     });
@@ -149,12 +163,12 @@ function rebuildFuseIndex() {
 }
 
 function saveUsernameToDB(usernameData) {
-  const { username, displayName, userPub, lastSeen } = usernameData;
+  const { username, displayName, userPub, epub, lastSeen } = usernameData;
   
   db.run(`
-    INSERT OR REPLACE INTO usernames (username, display_name, user_pub, last_seen)
-    VALUES (?, ?, ?, ?)
-  `, [username, displayName, userPub, lastSeen || Date.now()], (err) => {
+    INSERT OR REPLACE INTO usernames (username, display_name, user_pub, epub, last_seen)
+    VALUES (?, ?, ?, ?, ?)
+  `, [username, displayName, userPub, epub, lastSeen || Date.now()], (err) => {
     if (err) {
       console.error('❌ Failed to save username to DB:', err);
     }
@@ -163,10 +177,25 @@ function saveUsernameToDB(usernameData) {
 
 async function addUsernameToIndex(userData) {
   const key = userData.username.toLowerCase();
+  const existing = usernameIndex.get(key);
+  
   usernameIndex.set(key, userData);
   rebuildFuseIndex();
   saveUsernameToDB(userData);
-  console.log(`✅ Added ${userData.username} to index`);
+  
+  // Notifica via Socket.IO se è un nuovo utente o se l'epub è stato aggiornato
+  if (!existing) {
+    console.log(`✅ Added new user ${userData.username} to index`);
+    notifyUserRegistered(userData);
+  } else if (existing.epub !== userData.epub && userData.epub) {
+    console.log(`✅ Updated epub for ${userData.username}`);
+    notifyEpubUpdated(userData.userPub, userData.epub);
+  } else if (existing.displayName !== userData.displayName) {
+    console.log(`✅ Updated display name for ${userData.username}`);
+    notifyDisplayNameUpdated(userData.userPub, userData.displayName);
+  } else {
+    console.log(`✅ Updated ${userData.username} in index`);
+  }
 }
 
 
@@ -179,13 +208,44 @@ async function syncWithGunDB() {
   
   try {
     // Listen for new registered users
-    gun.get('users').map().on((userData, userId) => {
+    gun.get('users').map().on(async (userData, userId) => {
       if (userData && userData.alias) {
+        // Try to get the epub for this user
+        let epub = null;
+        try {
+          // Try multiple approaches to get epub
+          const userPub = userData.pub || userId;
+          if (userPub) {
+            // Approach 1: Direct epub lookup
+            epub = await new Promise((resolve) => {
+              const timeout = setTimeout(() => resolve(null), 2000);
+              gun.get(userPub).get('epub').once((data) => {
+                clearTimeout(timeout);
+                resolve(data || null);
+              });
+            });
+            
+            // Approach 2: Via user keys if first approach failed
+            if (!epub) {
+              epub = await new Promise((resolve) => {
+                const timeout = setTimeout(() => resolve(null), 2000);
+                gun.get(userPub).get('user').get('epub').once((data) => {
+                  clearTimeout(timeout);
+                  resolve(data || null);
+                });
+              });
+            }
+          }
+        } catch (error) {
+          console.log('⚠️ Could not fetch epub for user:', userData.alias);
+        }
+        
         addUsernameToIndex({
           userId,
           username: userData.alias,
           displayName: userData.displayName || userData.alias,
-          pub: userData.pub,
+          userPub: userData.pub || userId,
+          epub: epub,
           lastSeen: userData.lastSeen || Date.now()
         });
       }
@@ -211,6 +271,97 @@ async function syncWithGunDB() {
   }
 }
 
+// ============================================================================
+// SOCKET.IO REAL-TIME NOTIFICATIONS
+// ============================================================================
+
+io.on('connection', (socket) => {
+  console.log(`🔌 Client connected: ${socket.id}`);
+  
+  // Notifica quando un nuovo utente si registra
+  socket.on('join', (data) => {
+    console.log(`👤 Client joined: ${data.userPub?.substring(0, 16)}...`);
+    socket.join(`user:${data.userPub}`);
+  });
+  
+  // Notifica quando un client si disconnette
+  socket.on('disconnect', () => {
+    console.log(`🔌 Client disconnected: ${socket.id}`);
+  });
+  
+  // Notifica quando un client inizia una chat
+  socket.on('startChat', (data) => {
+    console.log(`💬 Client starting chat: ${data.userPub?.substring(0, 16)}...`);
+    socket.join(`chat:${data.userPub}`);
+  });
+  
+  // Notifica quando un client invia un messaggio
+  socket.on('messageSent', (data) => {
+    console.log(`📨 Message sent: ${data.messageId?.substring(0, 16)}...`);
+    // Notifica al destinatario se online
+    socket.to(`user:${data.recipientPub}`).emit('messageReceived', {
+      messageId: data.messageId,
+      senderPub: data.senderPub,
+      recipientPub: data.recipientPub,
+      timestamp: Date.now()
+    });
+  });
+});
+
+// Funzione per notificare tutti i client di un nuovo utente
+function notifyUserRegistered(userData) {
+  console.log(`📢 Broadcasting new user: ${userData.username}`);
+  io.emit('userRegistered', {
+    username: userData.username,
+    displayName: userData.displayName,
+    pub: userData.userPub,
+    epub: userData.epub,
+    lastSeen: userData.lastSeen,
+    timestamp: Date.now()
+  });
+}
+
+// Funzione per notificare aggiornamenti epub
+function notifyEpubUpdated(userPub, epub) {
+  console.log(`📢 Broadcasting epub update for: ${userPub.substring(0, 16)}...`);
+  io.emit('epubUpdated', {
+    userPub,
+    epub,
+    timestamp: Date.now()
+  });
+}
+
+// Funzione per notificare aggiornamenti display name
+function notifyDisplayNameUpdated(userPub, displayName) {
+  console.log(`📢 Broadcasting display name update for: ${userPub.substring(0, 16)}...`);
+  io.emit('displayNameUpdated', {
+    userPub,
+    displayName,
+    timestamp: Date.now()
+  });
+}
+
+// Funzione per notificare nuovo messaggio
+function notifyMessageReceived(recipientPub, messageData) {
+  console.log(`📢 Broadcasting new message to: ${recipientPub.substring(0, 16)}...`);
+  io.to(`user:${recipientPub}`).emit('messageReceived', {
+    messageId: messageData.messageId,
+    senderPub: messageData.senderPub,
+    recipientPub: messageData.recipientPub,
+    timestamp: Date.now()
+  });
+}
+
+// Funzione per notificare aggiornamento contatti
+function notifyContactUpdated(userPub, contactData) {
+  console.log(`📢 Broadcasting contact update for: ${userPub.substring(0, 16)}...`);
+  io.to(`user:${userPub}`).emit('contactUpdated', {
+    contactPub: contactData.contactPub,
+    contactName: contactData.contactName,
+    action: contactData.action, // 'added', 'updated', 'removed'
+    timestamp: Date.now()
+  });
+}
 
 // ============================================================================
 // API ROUTES
@@ -271,6 +422,7 @@ app.get('/api/search/:username', async (req, res) => {
           username: r.username,
           displayName: r.displayName,
           pub: r.pub,
+          epub: r.epub,
           lastSeen: r.lastSeen
         })),
         total: results.length
@@ -324,6 +476,7 @@ app.get('/api/search/pub/:pubKey', async (req, res) => {
             username: userData.username,
             displayName: userData.displayName,
             pub: userData.pub,
+            epub: userData.epub,
             lastSeen: userData.lastSeen
           }],
           total: 1
@@ -397,9 +550,10 @@ async function startServer() {
     
     await syncWithGunDB();
     
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
       console.log(`🚀 Linda Username Server running on port ${PORT}`);
       console.log(`📊 Username index: ${usernameIndex.size} entries`);
+      console.log(`🔌 Socket.IO server ready for real-time notifications`);
       console.log(`🔧 Config:`, CONFIG);
     });
   } catch (error) {
