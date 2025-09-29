@@ -90,7 +90,7 @@ async function initDatabase() {
   return new Promise((resolve, reject) => {
     // Create tables if they don't exist
     db.serialize(() => {
-      // Username table only
+      // Username table
       db.run(`
         CREATE TABLE IF NOT EXISTS usernames (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,14 +102,66 @@ async function initDatabase() {
         )
       `);
       
+      // Groups table
+      db.run(`
+        CREATE TABLE IF NOT EXISTS groups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_id TEXT UNIQUE NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          created_by TEXT NOT NULL,
+          created_at INTEGER DEFAULT (strftime('%s', 'now')),
+          is_active INTEGER DEFAULT 1,
+          message_count INTEGER DEFAULT 0,
+          last_message_time INTEGER,
+          metadata TEXT
+        )
+      `);
+      
+      // Group members table
+      db.run(`
+        CREATE TABLE IF NOT EXISTS group_members (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_id TEXT NOT NULL,
+          user_pub TEXT NOT NULL,
+          user_epub TEXT NOT NULL,
+          username TEXT,
+          role TEXT DEFAULT 'member',
+          joined_at INTEGER DEFAULT (strftime('%s', 'now')),
+          last_seen INTEGER,
+          UNIQUE(group_id, user_pub)
+        )
+      `);
+      
+      // Group messages table
+      db.run(`
+        CREATE TABLE IF NOT EXISTS group_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_id TEXT NOT NULL,
+          message_id TEXT UNIQUE NOT NULL,
+          from_user TEXT NOT NULL,
+          content TEXT,
+          timestamp INTEGER DEFAULT (strftime('%s', 'now')),
+          is_encrypted INTEGER DEFAULT 0,
+          signature TEXT,
+          metadata TEXT
+        )
+      `);
+      
       // Indexes for performance
       db.run(`CREATE INDEX IF NOT EXISTS idx_username ON usernames(username)`);
       db.run(`CREATE INDEX IF NOT EXISTS idx_display_name ON usernames(display_name)`);
       db.run(`CREATE INDEX IF NOT EXISTS idx_user_pub ON usernames(user_pub)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_groups_group_id ON groups(group_id)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_groups_created_by ON groups(created_by)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_group_members_group_id ON group_members(group_id)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_group_members_user_pub ON group_members(user_pub)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_group_messages_group_id ON group_messages(group_id)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_group_messages_timestamp ON group_messages(timestamp)`);
       
       // Load data into memory
       loadUsernamesFromDB();
-      console.log('✅ Database initialized');
+      console.log('✅ Database initialized with groups support');
       resolve();
     });
   });
@@ -225,6 +277,332 @@ app.get('/api/health', (req, res) => {
       usernames: usernameIndex.size
     }
   });
+});
+
+// ============================================================================
+// GROUP API
+// ============================================================================
+
+// Create group
+app.post('/api/groups', async (req, res) => {
+  try {
+    const { groupId, name, description, createdBy, members = [] } = req.body;
+    
+    if (!groupId || !name || !createdBy) {
+      return res.status(400).json({
+        success: false,
+        error: 'groupId, name, and createdBy are required'
+      });
+    }
+
+    // Save group to database
+    db.run(`
+      INSERT OR REPLACE INTO groups (group_id, name, description, created_by, created_at, is_active)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [groupId, name, description, createdBy, Date.now(), 1], (err) => {
+      if (err) {
+        console.error('❌ Failed to save group:', err);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to save group'
+        });
+      }
+
+      // Save members
+      if (members.length > 0) {
+        const memberStmt = db.prepare(`
+          INSERT OR REPLACE INTO group_members (group_id, user_pub, user_epub, username, role, joined_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `);
+
+        members.forEach(member => {
+          memberStmt.run([
+            groupId,
+            member.userPub,
+            member.userEpub,
+            member.username || null,
+            member.role || 'member',
+            Date.now()
+          ]);
+        });
+
+        memberStmt.finalize();
+      }
+
+      res.json({
+        success: true,
+        message: 'Group created successfully',
+        groupId
+      });
+    });
+  } catch (error) {
+    console.error('❌ Create group error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Get group
+app.get('/api/groups/:groupId', async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    
+    db.get(`
+      SELECT * FROM groups WHERE group_id = ?
+    `, [groupId], (err, group) => {
+      if (err) {
+        console.error('❌ Failed to get group:', err);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to get group'
+        });
+      }
+
+      if (!group) {
+        return res.status(404).json({
+          success: false,
+          error: 'Group not found'
+        });
+      }
+
+      // Get members
+      db.all(`
+        SELECT * FROM group_members WHERE group_id = ?
+      `, [groupId], (err, members) => {
+        if (err) {
+          console.error('❌ Failed to get group members:', err);
+          return res.status(500).json({
+            success: false,
+            error: 'Failed to get group members'
+          });
+        }
+
+        res.json({
+          success: true,
+          group: {
+            ...group,
+            members: members.map(m => ({
+              userPub: m.user_pub,
+              userEpub: m.user_epub,
+              username: m.username,
+              role: m.role,
+              joinedAt: m.joined_at,
+              lastSeen: m.last_seen
+            }))
+          }
+        });
+      });
+    });
+  } catch (error) {
+    console.error('❌ Get group error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Add member to group
+app.post('/api/groups/:groupId/members', async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { userPub, userEpub, username, role = 'member' } = req.body;
+    
+    if (!userPub || !userEpub) {
+      return res.status(400).json({
+        success: false,
+        error: 'userPub and userEpub are required'
+      });
+    }
+
+    db.run(`
+      INSERT OR REPLACE INTO group_members (group_id, user_pub, user_epub, username, role, joined_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [groupId, userPub, userEpub, username, role, Date.now()], (err) => {
+      if (err) {
+        console.error('❌ Failed to add member:', err);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to add member'
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Member added successfully'
+      });
+    });
+  } catch (error) {
+    console.error('❌ Add member error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Remove member from group
+app.delete('/api/groups/:groupId/members/:userPub', async (req, res) => {
+  try {
+    const { groupId, userPub } = req.params;
+    
+    db.run(`
+      DELETE FROM group_members WHERE group_id = ? AND user_pub = ?
+    `, [groupId, userPub], (err) => {
+      if (err) {
+        console.error('❌ Failed to remove member:', err);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to remove member'
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Member removed successfully'
+      });
+    });
+  } catch (error) {
+    console.error('❌ Remove member error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Get user groups
+app.get('/api/users/:userPub/groups', async (req, res) => {
+  try {
+    const { userPub } = req.params;
+    
+    db.all(`
+      SELECT g.*, gm.role, gm.joined_at as member_joined_at
+      FROM groups g
+      JOIN group_members gm ON g.group_id = gm.group_id
+      WHERE gm.user_pub = ? AND g.is_active = 1
+      ORDER BY g.last_message_time DESC, g.created_at DESC
+    `, [userPub], (err, groups) => {
+      if (err) {
+        console.error('❌ Failed to get user groups:', err);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to get user groups'
+        });
+      }
+
+      res.json({
+        success: true,
+        groups: groups.map(g => ({
+          groupId: g.group_id,
+          name: g.name,
+          description: g.description,
+          createdBy: g.created_by,
+          createdAt: g.created_at,
+          isActive: g.is_active,
+          messageCount: g.message_count,
+          lastMessageTime: g.last_message_time,
+          role: g.role,
+          memberJoinedAt: g.member_joined_at
+        }))
+      });
+    });
+  } catch (error) {
+    console.error('❌ Get user groups error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Save group message
+app.post('/api/groups/:groupId/messages', async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { messageId, fromUser, content, timestamp, isEncrypted = false, signature } = req.body;
+    
+    if (!messageId || !fromUser || !content) {
+      return res.status(400).json({
+        success: false,
+        error: 'messageId, fromUser, and content are required'
+      });
+    }
+
+    db.run(`
+      INSERT OR REPLACE INTO group_messages (group_id, message_id, from_user, content, timestamp, is_encrypted, signature)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [groupId, messageId, fromUser, content, timestamp || Date.now(), isEncrypted ? 1 : 0, signature], (err) => {
+      if (err) {
+        console.error('❌ Failed to save message:', err);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to save message'
+        });
+      }
+
+      // Update group message count and last message time
+      db.run(`
+        UPDATE groups 
+        SET message_count = message_count + 1, last_message_time = ?
+        WHERE group_id = ?
+      `, [timestamp || Date.now(), groupId]);
+
+      res.json({
+        success: true,
+        message: 'Message saved successfully'
+      });
+    });
+  } catch (error) {
+    console.error('❌ Save message error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Get group messages
+app.get('/api/groups/:groupId/messages', async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { limit = 50, offset = 0 } = req.query;
+    
+    db.all(`
+      SELECT * FROM group_messages 
+      WHERE group_id = ? 
+      ORDER BY timestamp DESC 
+      LIMIT ? OFFSET ?
+    `, [groupId, parseInt(limit), parseInt(offset)], (err, messages) => {
+      if (err) {
+        console.error('❌ Failed to get messages:', err);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to get messages'
+        });
+      }
+
+      res.json({
+        success: true,
+        messages: messages.map(m => ({
+          id: m.message_id,
+          from: m.from_user,
+          content: m.content,
+          timestamp: m.timestamp,
+          isEncrypted: m.is_encrypted === 1,
+          signature: m.signature
+        }))
+      });
+    });
+  } catch (error) {
+    console.error('❌ Get messages error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
 });
 
 // ============================================================================
