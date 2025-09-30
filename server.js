@@ -594,6 +594,46 @@ io.on("connection", (socket) => {
       lastSeen,
     });
   });
+
+  // === PERSISTENT EVENTS (for optimization notifications) ===
+
+  // Message sent notification
+  socket.on("messageSent", (data) => {
+    const { messageId, senderPub, recipientPub, timestamp } = data;
+    console.log(
+      `📨 Message sent: ${messageId?.substring(0, 8)}... from ${senderPub?.substring(0, 8)}... to ${recipientPub?.substring(0, 8)}...`
+    );
+
+    // Notify recipient that a new message was sent
+    io.to(`user:${recipientPub}`).emit("messageReceived", {
+      messageId,
+      senderPub,
+      recipientPub,
+      timestamp,
+    });
+  });
+
+  // Chat started notification
+  socket.on("startChat", (data) => {
+    const { userPub } = data;
+    console.log(
+      `💬 Chat started with: ${userPub?.substring(0, 16)}...`
+    );
+
+    // Could notify the other user that someone wants to chat
+    // (optional - currently not used in client)
+  });
+
+  // Contact updated notification
+  socket.on("contactUpdated", (data) => {
+    const { contactPub, contactName, action, timestamp } = data;
+    console.log(
+      `👤 Contact ${action}: ${contactName} (${contactPub?.substring(0, 8)}...)`
+    );
+
+    // Could broadcast to update contact lists
+    // (optional - currently GunDB handles sync)
+  });
 });
 
 // Helper function to get online users count
