@@ -193,16 +193,13 @@ async function addUsernameToIndex(userData) {
   rebuildFuseIndex();
   saveUsernameToDB(userData);
   
-  // Notifica via Socket.IO se è un nuovo utente o se l'epub è stato aggiornato
+  // Log changes (GunDB handles sync, no Socket.IO needed for persistent data)
   if (!existing) {
     console.log(`✅ Added new user ${userData.username} to index`);
-    notifyUserRegistered(userData);
   } else if (existing.epub !== userData.epub && userData.epub) {
     console.log(`✅ Updated epub for ${userData.username}`);
-    notifyEpubUpdated(userData.userPub, userData.epub);
   } else if (existing.displayName !== userData.displayName) {
     console.log(`✅ Updated display name for ${userData.username}`);
-    notifyDisplayNameUpdated(userData.userPub, userData.displayName);
   } else {
     console.log(`✅ Updated ${userData.username} in index`);
   }
@@ -264,13 +261,45 @@ async function syncWithGunDB() {
     // Listen for display name updates
     gun.get('displayNames').map().on((displayData, username) => {
       if (displayData && displayData.userPub) {
-        const key = username.toLowerCase();
-        const existing = usernameIndex.get(key);
+        console.log(`🔄 Display name update received: ${username} for ${displayData.userPub.substring(0, 16)}...`);
         
-        if (existing) {
-          existing.displayName = username;
-          existing.lastSeen = Date.now();
-          addUsernameToIndex(existing);
+        // Find existing user by userPub (not by username, since username might have changed)
+        let existingUser = null;
+        for (const [key, userData] of usernameIndex.entries()) {
+          if (userData.userPub === displayData.userPub) {
+            existingUser = userData;
+            // Remove old username from index if it changed
+            if (key !== username.toLowerCase()) {
+              console.log(`📝 Username changed from "${key}" to "${username.toLowerCase()}"`);
+              usernameIndex.delete(key);
+            }
+            break;
+          }
+        }
+        
+        if (existingUser) {
+          // Update with new username and display name
+          addUsernameToIndex({
+            userId: displayData.userPub,
+            username: username,
+            displayName: username,
+            userPub: displayData.userPub,
+            pub: displayData.userPub,
+            epub: existingUser.epub,
+            lastSeen: Date.now()
+          });
+        } else {
+          console.log(`⚠️ User not found in index, adding as new user: ${username}`);
+          // User not found, add as new entry (might be first time setting display name)
+          addUsernameToIndex({
+            userId: displayData.userPub,
+            username: username,
+            displayName: username,
+            userPub: displayData.userPub,
+            pub: displayData.userPub,
+            epub: null,
+            lastSeen: Date.now()
+          });
         }
       }
     });
@@ -285,92 +314,102 @@ async function syncWithGunDB() {
 // SOCKET.IO REAL-TIME NOTIFICATIONS
 // ============================================================================
 
+// Track online users
+const onlineUsers = new Map(); // userPub -> socket.id
+
 io.on('connection', (socket) => {
   console.log(`🔌 Client connected: ${socket.id}`);
   
-  // Notifica quando un nuovo utente si registra
+  // User joins with their pub key
   socket.on('join', (data) => {
-    console.log(`👤 Client joined: ${data.userPub?.substring(0, 16)}...`);
-    socket.join(`user:${data.userPub}`);
+    const userPub = data.userPub;
+    console.log(`👤 Client joined: ${userPub?.substring(0, 16)}...`);
+    socket.join(`user:${userPub}`);
+    onlineUsers.set(userPub, socket.id);
+    
+    // Notify others that this user is online
+    socket.broadcast.emit('userPresence', {
+      userPub,
+      isOnline: true,
+      lastSeen: Date.now()
+    });
   });
   
-  // Notifica quando un client si disconnette
+  // Handle disconnect
   socket.on('disconnect', () => {
     console.log(`🔌 Client disconnected: ${socket.id}`);
+    
+    // Find and remove user from online list
+    for (const [userPub, socketId] of onlineUsers.entries()) {
+      if (socketId === socket.id) {
+        onlineUsers.delete(userPub);
+        
+        // Notify others that this user is offline
+        socket.broadcast.emit('userPresence', {
+          userPub,
+          isOnline: false,
+          lastSeen: Date.now()
+        });
+        break;
+      }
+    }
   });
   
-  // Notifica quando un client inizia una chat
-  socket.on('startChat', (data) => {
-    console.log(`💬 Client starting chat: ${data.userPub?.substring(0, 16)}...`);
-    socket.join(`chat:${data.userPub}`);
+  // === EPHEMERAL EVENTS ===
+  
+  // Typing indicator
+  socket.on('typing', (data) => {
+    const { senderPub, recipientPub, isTyping } = data;
+    console.log(`⌨️ ${senderPub?.substring(0, 8)}... is ${isTyping ? 'typing' : 'stopped typing'} to ${recipientPub?.substring(0, 8)}...`);
+    
+    // Send only to recipient
+    io.to(`user:${recipientPub}`).emit('userTyping', {
+      senderPub,
+      recipientPub,
+      isTyping
+    });
   });
   
-  // Notifica quando un client invia un messaggio
-  socket.on('messageSent', (data) => {
-    console.log(`📨 Message sent: ${data.messageId?.substring(0, 16)}...`);
-    // Notifica al destinatario se online
-    socket.to(`user:${data.recipientPub}`).emit('messageReceived', {
-      messageId: data.messageId,
-      senderPub: data.senderPub,
-      recipientPub: data.recipientPub,
-      timestamp: Date.now()
+  // Message read receipt
+  socket.on('messageRead', (data) => {
+    const { messageId, readerPub, senderPub } = data;
+    console.log(`✓✓ Message ${messageId?.substring(0, 8)}... read by ${readerPub?.substring(0, 8)}...`);
+    
+    // Notify sender that message was read
+    io.to(`user:${senderPub}`).emit('messageRead', {
+      messageId,
+      readerPub
+    });
+  });
+  
+  // Presence update
+  socket.on('presence', (data) => {
+    const { userPub, isOnline, lastSeen } = data;
+    console.log(`👤 Presence update: ${userPub?.substring(0, 8)}... is ${isOnline ? 'online' : 'offline'}`);
+    
+    if (isOnline) {
+      onlineUsers.set(userPub, socket.id);
+    } else {
+      onlineUsers.delete(userPub);
+    }
+    
+    // Broadcast to all clients
+    socket.broadcast.emit('userPresence', {
+      userPub,
+      isOnline,
+      lastSeen
     });
   });
 });
 
-// Funzione per notificare tutti i client di un nuovo utente
-function notifyUserRegistered(userData) {
-  console.log(`📢 Broadcasting new user: ${userData.username}`);
-  io.emit('userRegistered', {
-    username: userData.username,
-    displayName: userData.displayName,
-    pub: userData.userPub,
-    epub: userData.epub,
-    lastSeen: userData.lastSeen,
-    timestamp: Date.now()
-  });
+// Helper function to get online users count
+function getOnlineUsersCount() {
+  return onlineUsers.size;
 }
 
-// Funzione per notificare aggiornamenti epub
-function notifyEpubUpdated(userPub, epub) {
-  console.log(`📢 Broadcasting epub update for: ${userPub.substring(0, 16)}...`);
-  io.emit('epubUpdated', {
-    userPub,
-    epub,
-    timestamp: Date.now()
-  });
-}
-
-// Funzione per notificare aggiornamenti display name
-function notifyDisplayNameUpdated(userPub, displayName) {
-  console.log(`📢 Broadcasting display name update for: ${userPub.substring(0, 16)}...`);
-  io.emit('displayNameUpdated', {
-    userPub,
-    displayName,
-    timestamp: Date.now()
-  });
-}
-
-// Funzione per notificare nuovo messaggio
-function notifyMessageReceived(recipientPub, messageData) {
-  console.log(`📢 Broadcasting new message to: ${recipientPub.substring(0, 16)}...`);
-  io.to(`user:${recipientPub}`).emit('messageReceived', {
-    messageId: messageData.messageId,
-    senderPub: messageData.senderPub,
-    recipientPub: messageData.recipientPub,
-    timestamp: Date.now()
-  });
-}
-
-// Funzione per notificare aggiornamento contatti
-function notifyContactUpdated(userPub, contactData) {
-  console.log(`📢 Broadcasting contact update for: ${userPub.substring(0, 16)}...`);
-  io.to(`user:${userPub}`).emit('contactUpdated', {
-    contactPub: contactData.contactPub,
-    contactName: contactData.contactName,
-    action: contactData.action, // 'added', 'updated', 'removed'
-    timestamp: Date.now()
-  });
+// Helper function to check if user is online
+function isUserOnline(userPub) {
+  return onlineUsers.has(userPub);
 }
 
 // ============================================================================
@@ -384,8 +423,20 @@ app.get('/api/health', (req, res) => {
     timestamp: Date.now(),
     config: CONFIG,
     stats: {
-      usernames: usernameIndex.size
+      usernames: usernameIndex.size,
+      onlineUsers: getOnlineUsersCount()
     }
+  });
+});
+
+// Get online status for specific user
+app.get('/api/presence/:userPub', (req, res) => {
+  const { userPub } = req.params;
+  res.json({
+    success: true,
+    userPub,
+    isOnline: isUserOnline(userPub),
+    timestamp: Date.now()
   });
 });
 
@@ -508,7 +559,7 @@ app.get('/api/search/pub/:pubKey', async (req, res) => {
   }
 });
 
-// Registra nuovo utente
+// Registra nuovo utente o aggiorna username esistente
 app.post('/api/register', async (req, res) => {
   try {
     const { username, displayName, pub } = req.body;
@@ -520,18 +571,41 @@ app.post('/api/register', async (req, res) => {
       });
     }
 
+    console.log(`📝 Register/Update request: username="${username}" pub="${pub.substring(0, 16)}..."`);
+
+    // **NEW: Check if user already exists with different username**
+    let oldUsername = null;
+    for (const [key, userData] of usernameIndex.entries()) {
+      if (userData.userPub === pub && key !== username.toLowerCase()) {
+        oldUsername = key;
+        console.log(`📝 Found existing user with old username "${oldUsername}", updating to "${username}"`);
+        usernameIndex.delete(oldUsername);
+        break;
+      }
+    }
+
+    // Get existing user data to preserve epub
+    let existingEpub = null;
+    const existingData = usernameIndex.get(username.toLowerCase());
+    if (existingData && existingData.userPub === pub) {
+      existingEpub = existingData.epub;
+    }
+
     await addUsernameToIndex({
       userId: pub,
       username,
       displayName: displayName || username,
       pub,
-      userPub: pub, // Aggiungi userPub per compatibilità
+      userPub: pub,
+      epub: existingEpub,
       lastSeen: Date.now()
     });
 
     res.json({
       success: true,
-      message: 'User registered successfully'
+      message: oldUsername 
+        ? `Username updated from "${oldUsername}" to "${username}"` 
+        : 'User registered successfully'
     });
   } catch (error) {
     console.error('❌ Registration error:', error);
