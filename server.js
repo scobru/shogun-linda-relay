@@ -1,34 +1,36 @@
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const compression = require('compression');
-const sqlite3 = require('sqlite3').verbose();
-const { ShogunCore } = require('shogun-core');
-const Fuse = require('fuse.js');
-const { Server } = require('socket.io');
-const http = require('http');
+const express = require("express");
+const cors = require("cors");
+const helmet = require("helmet");
+const compression = require("compression");
+const sqlite3 = require("sqlite3").verbose();
+const { ShogunCore } = require("shogun-core");
+const Fuse = require("fuse.js");
+const { Server } = require("socket.io");
+const http = require("http");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: "*",
-    methods: ["GET", "POST"]
-  }
+    methods: ["GET", "POST"],
+  },
 });
 const PORT = process.env.PORT || 8765;
 
 // Middleware
 app.use(helmet());
 app.use(compression());
-app.use(cors({
-  origin: '*', // process.env.FRONTEND_URL || 'https://linda.shogun-eco.xyz',
-  credentials: true
-}));
-app.use(express.json({ limit: '50mb' }));
+app.use(
+  cors({
+    origin: "*", // process.env.FRONTEND_URL || 'https://linda.shogun-eco.xyz',
+    credentials: true,
+  })
+);
+app.use(express.json({ limit: "50mb" }));
 
 // SQLite database
-const db = new sqlite3.Database('./linda_optimization.db');
+const db = new sqlite3.Database("./linda_optimization.db");
 
 // Shogun Core connection (same as client)
 let gun = null;
@@ -37,34 +39,36 @@ let core = null;
 // Initialize Shogun Core with same config as client
 async function initializeShogunCore() {
   try {
-    console.log('🔧 Initializing Shogun Core for server...');
-    
+    console.log("🔧 Initializing Shogun Core for server...");
+
     // Same peers and config as client
-    const peers = process.env.GUNDB_PEERS ? process.env.GUNDB_PEERS.split(',') : [
-      'https://relay.shogun-eco.xyz/gun',
-      'https://v5g5jseqhgkp43lppgregcfbvi.srv.us/gun', 
-      'https://peer.wallie.io/gun'
-    ];
-    
+    const peers = process.env.GUNDB_PEERS
+      ? process.env.GUNDB_PEERS.split(",")
+      : [
+          "https://relay.shogun-eco.xyz/gun",
+          "https://v5g5jseqhgkp43lppgregcfbvi.srv.us/gun",
+          "https://peer.wallie.io/gun",
+        ];
+
     core = new ShogunCore({
-      appName: 'Linda Username Server',
-      appDescription: 'Username tracking for Linda messaging',
-      appUrl: 'http://localhost:3001',
+      appName: "Linda Username Server",
+      appDescription: "Username tracking for Linda messaging",
+      appUrl: "http://localhost:3001",
       gunOptions: {
-        authToken: 'shogun2025',
+        authToken: "shogun2025",
         peers: peers,
         radisk: true,
         localStorage: false,
-        ws:true,
-      }
+        ws: true,
+      },
     });
-    
+
     gun = core.gun;
-    
-    console.log('✅ Shogun Core initialized for server with peers:', peers);
+
+    console.log("✅ Shogun Core initialized for server with peers:", peers);
     return true;
   } catch (error) {
-    console.error('❌ Failed to initialize Shogun Core:', error);
+    console.error("❌ Failed to initialize Shogun Core:", error);
     return false;
   }
 }
@@ -73,7 +77,7 @@ async function initializeShogunCore() {
 const CONFIG = {
   // Username Index
   MAX_USERNAME_RESULTS: 20,
-  FUSE_THRESHOLD: 0.3
+  FUSE_THRESHOLD: 0.3,
 };
 
 // In-memory cache
@@ -83,12 +87,12 @@ let fuseIndex = null;
 // Fuse.js configuration for fuzzy search
 const fuseOptions = {
   keys: [
-    { name: 'username', weight: 0.7 },
-    { name: 'displayName', weight: 0.3 }
+    { name: "username", weight: 0.7 },
+    { name: "displayName", weight: 0.3 },
   ],
   threshold: CONFIG.FUSE_THRESHOLD,
   includeScore: true,
-  minMatchCharLength: 2
+  minMatchCharLength: 2,
 };
 
 // ============================================================================
@@ -111,29 +115,30 @@ async function initDatabase() {
           created_at INTEGER DEFAULT (strftime('%s', 'now'))
         )
       `);
-      
+
       // Add epub column if it doesn't exist (for existing databases)
       db.run(`ALTER TABLE usernames ADD COLUMN epub TEXT`, (err) => {
         if (err) {
-          if (err.message.includes('duplicate column name')) {
-            console.log('✅ Epub column already exists in usernames table');
+          if (err.message.includes("duplicate column name")) {
+            console.log("✅ Epub column already exists in usernames table");
           } else {
-            console.error('❌ Error adding epub column:', err);
+            console.error("❌ Error adding epub column:", err);
           }
         } else {
-          console.log('✅ Added epub column to usernames table');
+          console.log("✅ Added epub column to usernames table");
         }
       });
-      
-      
+
       // Indexes for performance
       db.run(`CREATE INDEX IF NOT EXISTS idx_username ON usernames(username)`);
-      db.run(`CREATE INDEX IF NOT EXISTS idx_display_name ON usernames(display_name)`);
+      db.run(
+        `CREATE INDEX IF NOT EXISTS idx_display_name ON usernames(display_name)`
+      );
       db.run(`CREATE INDEX IF NOT EXISTS idx_user_pub ON usernames(user_pub)`);
-      
+
       // Load data into memory
       loadUsernamesFromDB();
-      console.log('✅ Database initialized');
+      console.log("✅ Database initialized");
       resolve();
     });
   });
@@ -144,24 +149,24 @@ async function initDatabase() {
 // ============================================================================
 
 function loadUsernamesFromDB() {
-  db.all('SELECT * FROM usernames', (err, rows) => {
+  db.all("SELECT * FROM usernames", (err, rows) => {
     if (err) {
-      console.error('❌ Failed to load usernames from DB:', err);
+      console.error("❌ Failed to load usernames from DB:", err);
       return;
     }
-    
+
     usernameIndex.clear();
-    rows.forEach(row => {
+    rows.forEach((row) => {
       usernameIndex.set(row.username.toLowerCase(), {
         userId: row.user_pub,
         username: row.username,
         displayName: row.display_name || row.username,
         pub: row.user_pub,
         epub: row.epub,
-        lastSeen: row.last_seen || Date.now()
+        lastSeen: row.last_seen || Date.now(),
       });
     });
-    
+
     rebuildFuseIndex();
     console.log(`📚 Loaded ${usernameIndex.size} usernames from SQLite`);
   });
@@ -174,25 +179,29 @@ function rebuildFuseIndex() {
 
 function saveUsernameToDB(usernameData) {
   const { username, displayName, userPub, epub, lastSeen } = usernameData;
-  
-  db.run(`
+
+  db.run(
+    `
     INSERT OR REPLACE INTO usernames (username, display_name, user_pub, epub, last_seen)
     VALUES (?, ?, ?, ?, ?)
-  `, [username, displayName, userPub, epub, lastSeen || Date.now()], (err) => {
-    if (err) {
-      console.error('❌ Failed to save username to DB:', err);
+  `,
+    [username, displayName, userPub, epub, lastSeen || Date.now()],
+    (err) => {
+      if (err) {
+        console.error("❌ Failed to save username to DB:", err);
+      }
     }
-  });
+  );
 }
 
 async function addUsernameToIndex(userData) {
   const key = userData.username.toLowerCase();
   const existing = usernameIndex.get(key);
-  
+
   usernameIndex.set(key, userData);
   rebuildFuseIndex();
   saveUsernameToDB(userData);
-  
+
   // Log changes (GunDB handles sync, no Socket.IO needed for persistent data)
   if (!existing) {
     console.log(`✅ Added new user ${userData.username} to index`);
@@ -205,108 +214,280 @@ async function addUsernameToIndex(userData) {
   }
 }
 
-
 // ============================================================================
 // GUNDB SYNC
 // ============================================================================
 
 async function syncWithGunDB() {
-  console.log('🔄 Starting GunDB sync...');
-  
+  console.log("🔄 Starting GunDB sync...");
+
   try {
-    // Listen for new registered users
-    gun.get('users').map().on(async (userData, userId) => {
-      if (userData && userData.alias) {
-        // Try to get the epub for this user
-        let epub = null;
-        try {
-          // Try multiple approaches to get epub
-          const userPub = userData.pub || userId;
-          if (userPub) {
-            // Approach 1: Direct epub lookup
+    // Listen for username mappings (usernames/username -> userPub)
+    gun
+      .get("usernames")
+      .map()
+      .on(async (userPub, username) => {
+        if (userPub && username) {
+          console.log(
+            `📝 Username mapping detected: ${username} -> ${userPub.substring(
+              0,
+              16
+            )}...`
+          );
+
+          // Try to get the epub for this user
+          let epub = null;
+          try {
             epub = await new Promise((resolve) => {
-              const timeout = setTimeout(() => resolve(null), 2000);
-              gun.get(userPub).get('epub').once((data) => {
-                clearTimeout(timeout);
-                resolve(data || null);
-              });
-            });
-            
-            // Approach 2: Via user keys if first approach failed
-            if (!epub) {
-              epub = await new Promise((resolve) => {
-                const timeout = setTimeout(() => resolve(null), 2000);
-                gun.get(userPub).get('user').get('epub').once((data) => {
+              const timeout = setTimeout(() => resolve(null), 3000);
+              gun
+                .get(userPub)
+                .get("epub")
+                .once((data) => {
                   clearTimeout(timeout);
                   resolve(data || null);
                 });
-              });
-            }
+            });
+          } catch (error) {
+            console.log("⚠️ Could not fetch epub for user:", username);
           }
-        } catch (error) {
-          console.log('⚠️ Could not fetch epub for user:', userData.alias);
+
+          addUsernameToIndex({
+            userId: userPub,
+            username: username,
+            displayName: username,
+            userPub: userPub,
+            epub: epub,
+            lastSeen: Date.now(),
+          });
         }
-        
-        addUsernameToIndex({
-          userId,
-          username: userData.alias,
-          displayName: userData.displayName || userData.alias,
-          userPub: userData.pub || userId,
-          epub: epub,
-          lastSeen: userData.lastSeen || Date.now()
-        });
-      }
-    });
+      });
+
+    // Listen for alias mappings (~@username -> userPub)
+    gun
+      .get("~@")
+      .map()
+      .on(async (aliasData, username) => {
+        if (aliasData && username) {
+          console.log(
+            `📝 Alias mapping detected: ~@${username} -> ${aliasData.substring(
+              0,
+              16
+            )}...`
+          );
+
+          // Extract userPub from alias data
+          const userPub = aliasData
+            .replace("~@", "")
+            .replace(username, "")
+            .replace(/^~/, "");
+
+          if (userPub && userPub.length > 10) {
+            // Try to get the epub for this user
+            let epub = null;
+            try {
+              epub = await new Promise((resolve) => {
+                const timeout = setTimeout(() => resolve(null), 3000);
+                gun
+                  .get(userPub)
+                  .get("epub")
+                  .once((data) => {
+                    clearTimeout(timeout);
+                    resolve(data || null);
+                  });
+              });
+            } catch (error) {
+              console.log("⚠️ Could not fetch epub for user:", username);
+            }
+
+            addUsernameToIndex({
+              userId: userPub,
+              username: username,
+              displayName: username,
+              userPub: userPub,
+              epub: epub,
+              lastSeen: Date.now(),
+            });
+          }
+        }
+      });
+
+    // Listen for new registered users (legacy path)
+    gun
+      .get("users")
+      .map()
+      .on(async (userData, userId) => {
+        if (userData && userData.alias) {
+          // Try to get the epub for this user
+          let epub = null;
+          try {
+            // Try multiple approaches to get epub
+            const userPub = userData.pub || userId;
+            if (userPub) {
+              // Approach 1: Direct epub lookup
+              epub = await new Promise((resolve) => {
+                const timeout = setTimeout(() => resolve(null), 2000);
+                gun
+                  .get(userPub)
+                  .get("epub")
+                  .once((data) => {
+                    clearTimeout(timeout);
+                    resolve(data || null);
+                  });
+              });
+
+              // Approach 2: Via user keys if first approach failed
+              if (!epub) {
+                epub = await new Promise((resolve) => {
+                  const timeout = setTimeout(() => resolve(null), 2000);
+                  gun
+                    .get(userPub)
+                    .get("user")
+                    .get("epub")
+                    .once((data) => {
+                      clearTimeout(timeout);
+                      resolve(data || null);
+                    });
+                });
+              }
+            }
+          } catch (error) {
+            console.log("⚠️ Could not fetch epub for user:", userData.alias);
+          }
+
+          addUsernameToIndex({
+            userId,
+            username: userData.alias,
+            displayName: userData.displayName || userData.alias,
+            userPub: userData.pub || userId,
+            epub: epub,
+            lastSeen: userData.lastSeen || Date.now(),
+          });
+        }
+      });
 
     // Listen for display name updates
-    gun.get('displayNames').map().on((displayData, username) => {
-      if (displayData && displayData.userPub) {
-        console.log(`🔄 Display name update received: ${username} for ${displayData.userPub.substring(0, 16)}...`);
-        
-        // Find existing user by userPub (not by username, since username might have changed)
-        let existingUser = null;
-        for (const [key, userData] of usernameIndex.entries()) {
-          if (userData.userPub === displayData.userPub) {
-            existingUser = userData;
-            // Remove old username from index if it changed
-            if (key !== username.toLowerCase()) {
-              console.log(`📝 Username changed from "${key}" to "${username.toLowerCase()}"`);
-              usernameIndex.delete(key);
+    gun
+      .get("displayNames")
+      .map()
+      .on((displayData, username) => {
+        if (displayData && displayData.userPub) {
+          console.log(
+            `🔄 Display name update received: ${username} for ${displayData.userPub.substring(
+              0,
+              16
+            )}...`
+          );
+
+          // Find existing user by userPub (not by username, since username might have changed)
+          let existingUser = null;
+          for (const [key, userData] of usernameIndex.entries()) {
+            if (userData.userPub === displayData.userPub) {
+              existingUser = userData;
+              // Remove old username from index if it changed
+              if (key !== username.toLowerCase()) {
+                console.log(
+                  `📝 Username changed from "${key}" to "${username.toLowerCase()}"`
+                );
+                usernameIndex.delete(key);
+              }
+              break;
             }
-            break;
+          }
+
+          if (existingUser) {
+            // Update with new username and display name
+            addUsernameToIndex({
+              userId: displayData.userPub,
+              username: username,
+              displayName: username,
+              userPub: displayData.userPub,
+              pub: displayData.userPub,
+              epub: existingUser.epub,
+              lastSeen: Date.now(),
+            });
+          } else {
+            console.log(
+              `⚠️ User not found in index, adding as new user: ${username}`
+            );
+            // User not found, add as new entry (might be first time setting display name)
+            addUsernameToIndex({
+              userId: displayData.userPub,
+              username: username,
+              displayName: username,
+              userPub: displayData.userPub,
+              pub: displayData.userPub,
+              epub: null,
+              lastSeen: Date.now(),
+            });
           }
         }
-        
-        if (existingUser) {
-          // Update with new username and display name
-          addUsernameToIndex({
-            userId: displayData.userPub,
-            username: username,
-            displayName: username,
-            userPub: displayData.userPub,
-            pub: displayData.userPub,
-            epub: existingUser.epub,
-            lastSeen: Date.now()
-          });
-        } else {
-          console.log(`⚠️ User not found in index, adding as new user: ${username}`);
-          // User not found, add as new entry (might be first time setting display name)
-          addUsernameToIndex({
-            userId: displayData.userPub,
-            username: username,
-            displayName: username,
-            userPub: displayData.userPub,
-            pub: displayData.userPub,
-            epub: null,
-            lastSeen: Date.now()
-          });
-        }
-      }
-    });
+      });
 
-    console.log('✅ GunDB sync active');
+    // Listen for epub key updates (when users publish their encryption keys)
+    // This is a more generic approach - listen to all user nodes for epub changes
+    let epubListenerActive = false;
+
+    function startEpubListener() {
+      if (epubListenerActive) return;
+      epubListenerActive = true;
+
+      console.log("🔑 Starting epub key listener...");
+
+      // Listen to all user nodes for epub changes
+      gun
+        .get("users")
+        .map()
+        .on(async (userData, userId) => {
+          if (userData && userId) {
+            const userPub = userData.pub || userId;
+
+            // Listen for epub changes on this specific user
+            gun
+              .get(userPub)
+              .get("epub")
+              .on(async (epubData) => {
+                if (
+                  epubData &&
+                  typeof epubData === "string" &&
+                  epubData.length > 10
+                ) {
+                  console.log(
+                    `🔑 Epub key published for user: ${userPub.substring(
+                      0,
+                      16
+                    )}...`
+                  );
+
+                  // Find user in our index and update epub
+                  let foundUser = null;
+                  for (const [key, userData] of usernameIndex.entries()) {
+                    if (userData.userPub === userPub) {
+                      foundUser = userData;
+                      break;
+                    }
+                  }
+
+                  if (foundUser) {
+                    console.log(`✅ Updated epub for ${foundUser.username}`);
+                    addUsernameToIndex({
+                      ...foundUser,
+                      epub: epubData,
+                      lastSeen: Date.now(),
+                    });
+                  }
+                }
+              });
+          }
+        });
+    }
+
+    // Start epub listener after a short delay
+    setTimeout(startEpubListener, 2000);
+
+    console.log("✅ GunDB sync active");
   } catch (error) {
-    console.error('❌ GunDB sync failed:', error);
+    console.error("❌ GunDB sync failed:", error);
   }
 }
 
@@ -317,87 +498,100 @@ async function syncWithGunDB() {
 // Track online users
 const onlineUsers = new Map(); // userPub -> socket.id
 
-io.on('connection', (socket) => {
+io.on("connection", (socket) => {
   console.log(`🔌 Client connected: ${socket.id}`);
-  
+
   // User joins with their pub key
-  socket.on('join', (data) => {
+  socket.on("join", (data) => {
     const userPub = data.userPub;
     console.log(`👤 Client joined: ${userPub?.substring(0, 16)}...`);
     socket.join(`user:${userPub}`);
     onlineUsers.set(userPub, socket.id);
-    
+
     // Notify others that this user is online
-    socket.broadcast.emit('userPresence', {
+    socket.broadcast.emit("userPresence", {
       userPub,
       isOnline: true,
-      lastSeen: Date.now()
+      lastSeen: Date.now(),
     });
   });
-  
+
   // Handle disconnect
-  socket.on('disconnect', () => {
+  socket.on("disconnect", () => {
     console.log(`🔌 Client disconnected: ${socket.id}`);
-    
+
     // Find and remove user from online list
     for (const [userPub, socketId] of onlineUsers.entries()) {
       if (socketId === socket.id) {
         onlineUsers.delete(userPub);
-        
+
         // Notify others that this user is offline
-        socket.broadcast.emit('userPresence', {
+        socket.broadcast.emit("userPresence", {
           userPub,
           isOnline: false,
-          lastSeen: Date.now()
+          lastSeen: Date.now(),
         });
         break;
       }
     }
   });
-  
+
   // === EPHEMERAL EVENTS ===
-  
+
   // Typing indicator
-  socket.on('typing', (data) => {
+  socket.on("typing", (data) => {
     const { senderPub, recipientPub, isTyping } = data;
-    console.log(`⌨️ ${senderPub?.substring(0, 8)}... is ${isTyping ? 'typing' : 'stopped typing'} to ${recipientPub?.substring(0, 8)}...`);
-    
+    console.log(
+      `⌨️ ${senderPub?.substring(0, 8)}... is ${
+        isTyping ? "typing" : "stopped typing"
+      } to ${recipientPub?.substring(0, 8)}...`
+    );
+
     // Send only to recipient
-    io.to(`user:${recipientPub}`).emit('userTyping', {
+    io.to(`user:${recipientPub}`).emit("userTyping", {
       senderPub,
       recipientPub,
-      isTyping
+      isTyping,
     });
   });
-  
+
   // Message read receipt
-  socket.on('messageRead', (data) => {
+  socket.on("messageRead", (data) => {
     const { messageId, readerPub, senderPub } = data;
-    console.log(`✓✓ Message ${messageId?.substring(0, 8)}... read by ${readerPub?.substring(0, 8)}...`);
-    
+    console.log(
+      `✓✓ Message ${messageId?.substring(
+        0,
+        8
+      )}... read by ${readerPub?.substring(0, 8)}...`
+    );
+
     // Notify sender that message was read
-    io.to(`user:${senderPub}`).emit('messageRead', {
+    io.to(`user:${senderPub}`).emit("messageRead", {
       messageId,
-      readerPub
+      readerPub,
     });
   });
-  
+
   // Presence update
-  socket.on('presence', (data) => {
+  socket.on("presence", (data) => {
     const { userPub, isOnline, lastSeen } = data;
-    console.log(`👤 Presence update: ${userPub?.substring(0, 8)}... is ${isOnline ? 'online' : 'offline'}`);
-    
+    console.log(
+      `👤 Presence update: ${userPub?.substring(0, 8)}... is ${
+        isOnline ? "online" : "offline"
+      }`
+    );
+
     if (isOnline) {
       onlineUsers.set(userPub, socket.id);
     } else {
       onlineUsers.delete(userPub);
     }
-    
+
     // Broadcast to all clients
-    socket.broadcast.emit('userPresence', {
+    socket.broadcast.emit("userPresence", {
       userPub,
       isOnline,
-      lastSeen
+      lastSeen,
     });
   });
 });
@@ -417,94 +611,88 @@ function isUserOnline(userPub) {
 // ============================================================================
 
 // Health check
-app.get('/api/health', (req, res) => {
+app.get("/api/health", (req, res) => {
   res.json({
-    status: 'healthy',
+    status: "healthy",
     timestamp: Date.now(),
     config: CONFIG,
     stats: {
       usernames: usernameIndex.size,
-      onlineUsers: getOnlineUsersCount()
-    }
+      onlineUsers: getOnlineUsersCount(),
+    },
   });
 });
 
 // Get online status for specific user
-app.get('/api/presence/:userPub', (req, res) => {
+app.get("/api/presence/:userPub", (req, res) => {
   const { userPub } = req.params;
   res.json({
     success: true,
     userPub,
     isOnline: isUserOnline(userPub),
-    timestamp: Date.now()
+    timestamp: Date.now(),
   });
 });
-
-
-
-
-
-
-
-
 
 // ============================================================================
 // USERNAME API
 // ============================================================================
 
 // Ricerca username
-app.get('/api/search/:username', async (req, res) => {
+app.get("/api/search/:username", async (req, res) => {
   try {
     const { username } = req.params;
     const { limit = CONFIG.MAX_USERNAME_RESULTS } = req.query;
-    
+
     console.log(`🔍 Searching for username: ${username}`);
-    
+
     let results = [];
-    
+
     // 1. Ricerca esatta per username
     const exactMatch = usernameIndex.get(username.toLowerCase());
     if (exactMatch) {
       results.push(exactMatch);
     }
-    
+
     // 2. Ricerca fuzzy con Fuse.js
     if (fuseIndex && results.length < limit) {
       const fuseResults = fuseIndex.search(username);
       const remaining = limit - results.length;
-      results = results.concat(fuseResults.slice(0, remaining).map(r => r.item));
+      results = results.concat(
+        fuseResults.slice(0, remaining).map((r) => r.item)
+      );
     }
-    
+
     if (results.length > 0) {
       return res.json({
         success: true,
         found: true,
-        results: results.map(r => ({
+        results: results.map((r) => ({
           username: r.username,
           displayName: r.displayName,
           pub: r.pub,
           epub: r.epub,
-          lastSeen: r.lastSeen
+          lastSeen: r.lastSeen,
         })),
-        total: results.length
+        total: results.length,
       });
     } else {
       return res.status(404).json({
         success: false,
         found: false,
-        error: "User not found"
+        error: "User not found",
       });
     }
   } catch (error) {
-    console.error('❌ Search error:', error);
+    console.error("❌ Search error:", error);
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: "Internal server error",
     });
   }
 });
 
-app.get('/', async (req, res) => {
+app.get("/", async (req, res) => {
   res.send(`
     <div>
       <h1>Shogun Linda Username Server</h1>
@@ -521,64 +709,73 @@ app.get('/', async (req, res) => {
 });
 
 // Ricerca per public key
-app.get('/api/search/pub/:pubKey', async (req, res) => {
+app.get("/api/search/pub/:pubKey", async (req, res) => {
   try {
     const { pubKey } = req.params;
-    
+
     console.log(`🔍 Searching for public key: ${pubKey.substring(0, 16)}...`);
-    
+
     // Cerca nell'indice per public key
     for (const [username, userData] of usernameIndex.entries()) {
       if (userData.pub === pubKey) {
         return res.json({
           success: true,
           found: true,
-          results: [{
-            username: userData.username,
-            displayName: userData.displayName,
-            pub: userData.pub,
-            epub: userData.epub,
-            lastSeen: userData.lastSeen
-          }],
-          total: 1
+          results: [
+            {
+              username: userData.username,
+              displayName: userData.displayName,
+              pub: userData.pub,
+              epub: userData.epub,
+              lastSeen: userData.lastSeen,
+            },
+          ],
+          total: 1,
         });
       }
     }
-    
+
     return res.status(404).json({
       success: false,
       found: false,
-      error: "Public key not found"
+      error: "Public key not found",
     });
   } catch (error) {
-    console.error('❌ Pub key search error:', error);
+    console.error("❌ Pub key search error:", error);
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: "Internal server error",
     });
   }
 });
 
 // Registra nuovo utente o aggiorna username esistente
-app.post('/api/register', async (req, res) => {
+app.post("/api/register", async (req, res) => {
   try {
     const { username, displayName, pub } = req.body;
-    
+
     if (!username || !pub) {
       return res.status(400).json({
         success: false,
-        error: 'Username and pub are required'
+        error: "Username and pub are required",
       });
     }
 
-    console.log(`📝 Register/Update request: username="${username}" pub="${pub.substring(0, 16)}..."`);
+    console.log(
+      `📝 Register/Update request: username="${username}" pub="${pub.substring(
+        0,
+        16
+      )}..."`
+    );
 
     // **NEW: Check if user already exists with different username**
     let oldUsername = null;
     for (const [key, userData] of usernameIndex.entries()) {
       if (userData.userPub === pub && key !== username.toLowerCase()) {
         oldUsername = key;
-        console.log(`📝 Found existing user with old username "${oldUsername}", updating to "${username}"`);
+        console.log(
+          `📝 Found existing user with old username "${oldUsername}", updating to "${username}"`
+        );
         usernameIndex.delete(oldUsername);
         break;
       }
@@ -598,24 +795,23 @@ app.post('/api/register', async (req, res) => {
       pub,
       userPub: pub,
       epub: existingEpub,
-      lastSeen: Date.now()
+      lastSeen: Date.now(),
     });
 
     res.json({
       success: true,
-      message: oldUsername 
-        ? `Username updated from "${oldUsername}" to "${username}"` 
-        : 'User registered successfully'
+      message: oldUsername
+        ? `Username updated from "${oldUsername}" to "${username}"`
+        : "User registered successfully",
     });
   } catch (error) {
-    console.error('❌ Registration error:', error);
+    console.error("❌ Registration error:", error);
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: "Internal server error",
     });
   }
 });
-
 
 // ============================================================================
 // SERVER STARTUP
@@ -624,16 +820,16 @@ app.post('/api/register', async (req, res) => {
 async function startServer() {
   try {
     await initDatabase();
-    
+
     // Initialize Shogun Core with same config as client
     const shogunInitialized = await initializeShogunCore();
     if (!shogunInitialized) {
-      console.error('❌ Failed to initialize Shogun Core, exiting...');
+      console.error("❌ Failed to initialize Shogun Core, exiting...");
       process.exit(1);
     }
-    
+
     await syncWithGunDB();
-    
+
     server.listen(PORT, () => {
       console.log(`🚀 Linda Username Server running on port ${PORT}`);
       console.log(`📊 Username index: ${usernameIndex.size} entries`);
@@ -641,21 +837,19 @@ async function startServer() {
       console.log(`🔧 Config:`, CONFIG);
     });
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
+    console.error("❌ Failed to start server:", error);
     process.exit(1);
   }
 }
 
-
-
 // Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('🛑 Shutting down username server...');
+process.on("SIGINT", () => {
+  console.log("🛑 Shutting down username server...");
   db.close((err) => {
     if (err) {
-      console.error('❌ Error closing database:', err);
+      console.error("❌ Error closing database:", err);
     } else {
-      console.log('✅ Database connection closed');
+      console.log("✅ Database connection closed");
     }
     process.exit(0);
   });
