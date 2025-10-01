@@ -742,6 +742,8 @@ app.get("/", async (req, res) => {
         <li>GET /api/health - Server health status</li>
         <li>GET /api/search/:username - Search users by username</li>
         <li>GET /api/search/pub/:pubKey - Search user by public key</li>
+        <li>GET /api/users/:username - Check if username exists</li>
+        <li>GET /api/users/pub/:pubKey - Check if user exists by public key</li>
         <li>POST /api/register - Register new user</li>
       </ul>
     </div>
@@ -784,6 +786,79 @@ app.get("/api/search/pub/:pubKey", async (req, res) => {
     console.error("❌ Pub key search error:", error);
     res.status(500).json({
       success: false,
+      error: "Internal server error",
+    });
+  }
+});
+
+// Check if user exists by username
+app.get("/api/users/:username", async (req, res) => {
+  try {
+    const { username } = req.params;
+    
+    console.log(`🔍 Checking if username exists: ${username}`);
+    
+    const userData = usernameIndex.get(username.toLowerCase());
+    
+    if (userData) {
+      return res.json({
+        exists: true,
+        username: userData.username,
+        displayName: userData.displayName,
+        pub: userData.pub,
+        epub: userData.epub,
+        lastSeen: userData.lastSeen,
+      });
+    } else {
+      return res.status(404).json({
+        exists: false,
+        error: "User not found",
+      });
+    }
+  } catch (error) {
+    console.error("❌ User existence check error:", error);
+    return res.status(500).json({
+      exists: false,
+      error: "Internal server error",
+    });
+  }
+});
+
+// Check if user exists by pub key
+app.get("/api/users/pub/:pubKey", async (req, res) => {
+  try {
+    const { pubKey } = req.params;
+    
+    console.log(`🔍 Checking if user exists by pub: ${pubKey.substring(0, 16)}...`);
+    
+    // Search through all users to find one with matching pub
+    let foundUser = null;
+    for (const [username, userData] of usernameIndex.entries()) {
+      if (userData.userPub === pubKey || userData.pub === pubKey) {
+        foundUser = userData;
+        break;
+      }
+    }
+    
+    if (foundUser) {
+      return res.json({
+        exists: true,
+        username: foundUser.username,
+        displayName: foundUser.displayName,
+        pub: foundUser.pub,
+        epub: foundUser.epub,
+        lastSeen: foundUser.lastSeen,
+      });
+    } else {
+      return res.status(404).json({
+        exists: false,
+        error: "User not found",
+      });
+    }
+  } catch (error) {
+    console.error("❌ User existence check by pub error:", error);
+    return res.status(500).json({
+      exists: false,
       error: "Internal server error",
     });
   }
