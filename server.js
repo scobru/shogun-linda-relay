@@ -826,8 +826,8 @@ app.get("/api/search/:username", async (req, res) => {
 app.get("/", async (req, res) => {
   res.send(`
     <div>
-      <h1>Shogun Linda Username Server</h1>
-      <p>This server provides username tracking and search functionality for Linda messaging.</p>
+      <h1>Shogun Linda Username Server ${SERVER_VERSION}</h1>
+      <p>This server provides username tracking, search functionality, and real-time notifications for Linda messaging.</p>
       <p>Available endpoints:</p>
       <ul>
         <li>GET /api/health - Server health status</li>
@@ -836,6 +836,13 @@ app.get("/", async (req, res) => {
         <li>GET /api/users/:username - Check if username exists</li>
         <li>GET /api/users/pub/:pubKey - Check if user exists by public key</li>
         <li>POST /api/register - Register new user</li>
+      </ul>
+      <h3>Real-time Features:</h3>
+      <ul>
+        <li>Socket.IO notifications for new messages</li>
+        <li>Typing indicators</li>
+        <li>Read receipts</li>
+        <li>User presence tracking</li>
       </ul>
     </div>
   `);
@@ -1037,7 +1044,7 @@ async function startServer() {
     await syncWithGunDB();
 
     server.listen(PORT, () => {
-      console.log(`🚀 Linda Username Server running on port ${PORT}`);
+      console.log(`🚀 Linda Username Server ${SERVER_VERSION} running on port ${PORT}`);
       console.log(`📊 Username index: ${usernameIndex.size} entries`);
       console.log(`🔌 Socket.IO server ready for real-time notifications`);
       console.log(`🔧 Config:`, CONFIG);
