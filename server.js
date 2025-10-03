@@ -46,9 +46,11 @@ async function initializeShogunCore() {
     const peers = process.env.GUNDB_PEERS
       ? process.env.GUNDB_PEERS.split(",")
       : [
-          "https://relay.shogun-eco.xyz/gun",
-          "https://v5g5jseqhgkp43lppgregcfbvi.srv.us/gun",
           "https://peer.wallie.io/gun",
+          "https://v5g5jseqhgkp43lppgregcfbvi.srv.us/gun",
+          "https://relay.shogun-eco.xyz/gun",
+          "https://gun.defucc.me/gun",
+          "https://a.talkflow.team/gun",
         ];
 
     core = new ShogunCore({
@@ -602,7 +604,13 @@ io.on("connection", (socket) => {
   socket.on("messageSent", (data) => {
     const { messageId, senderPub, recipientPub, timestamp } = data;
     console.log(
-      `📨 Message sent: ${messageId?.substring(0, 8)}... from ${senderPub?.substring(0, 8)}... to ${recipientPub?.substring(0, 8)}...`
+      `📨 Message sent: ${messageId?.substring(
+        0,
+        8
+      )}... from ${senderPub?.substring(0, 8)}... to ${recipientPub?.substring(
+        0,
+        8
+      )}...`
     );
 
     // Notify recipient that a new message was sent
@@ -617,9 +625,7 @@ io.on("connection", (socket) => {
   // Chat started notification
   socket.on("startChat", (data) => {
     const { userPub } = data;
-    console.log(
-      `💬 Chat started with: ${userPub?.substring(0, 16)}...`
-    );
+    console.log(`💬 Chat started with: ${userPub?.substring(0, 16)}...`);
 
     // Could notify the other user that someone wants to chat
     // (optional - currently not used in client)
@@ -640,9 +646,16 @@ io.on("connection", (socket) => {
 
   // Message notification (when user receives a new message)
   socket.on("messageNotification", (data) => {
-    const { messageId, senderPub, recipientPub, messagePreview, timestamp } = data;
+    const { messageId, senderPub, recipientPub, messagePreview, timestamp } =
+      data;
     console.log(
-      `🔔 Message notification: ${messageId?.substring(0, 8)}... from ${senderPub?.substring(0, 8)}... to ${recipientPub?.substring(0, 8)}...`
+      `🔔 Message notification: ${messageId?.substring(
+        0,
+        8
+      )}... from ${senderPub?.substring(0, 8)}... to ${recipientPub?.substring(
+        0,
+        8
+      )}...`
     );
 
     // Send notification to recipient
@@ -652,7 +665,7 @@ io.on("connection", (socket) => {
       recipientPub,
       messagePreview,
       timestamp,
-      type: "message"
+      type: "message",
     });
   });
 
@@ -660,7 +673,10 @@ io.on("connection", (socket) => {
   socket.on("messageReadNotification", (data) => {
     const { messageId, readerPub, senderPub, timestamp } = data;
     console.log(
-      `✓ Message read notification: ${messageId?.substring(0, 8)}... by ${readerPub?.substring(0, 8)}...`
+      `✓ Message read notification: ${messageId?.substring(
+        0,
+        8
+      )}... by ${readerPub?.substring(0, 8)}...`
     );
 
     // Notify sender that message was read
@@ -668,7 +684,7 @@ io.on("connection", (socket) => {
       messageId,
       readerPub,
       timestamp,
-      type: "read"
+      type: "read",
     });
   });
 
@@ -676,7 +692,9 @@ io.on("connection", (socket) => {
   socket.on("typingNotification", (data) => {
     const { senderPub, recipientPub, isTyping, timestamp } = data;
     console.log(
-      `⌨️ Typing notification: ${senderPub?.substring(0, 8)}... is ${isTyping ? "typing" : "stopped typing"} to ${recipientPub?.substring(0, 8)}...`
+      `⌨️ Typing notification: ${senderPub?.substring(0, 8)}... is ${
+        isTyping ? "typing" : "stopped typing"
+      } to ${recipientPub?.substring(0, 8)}...`
     );
 
     // Send typing indicator to recipient
@@ -685,7 +703,7 @@ io.on("connection", (socket) => {
       recipientPub,
       isTyping,
       timestamp,
-      type: "typing"
+      type: "typing",
     });
   });
 
@@ -693,13 +711,27 @@ io.on("connection", (socket) => {
 
   // Group message notification (when user receives a new group message)
   socket.on("groupMessageNotification", (data) => {
-    const { messageId, senderPub, groupId, groupName, messagePreview, timestamp, memberPubs } = data;
+    const {
+      messageId,
+      senderPub,
+      groupId,
+      groupName,
+      messagePreview,
+      timestamp,
+      memberPubs,
+    } = data;
     console.log(
-      `🔔 Group message notification: ${messageId?.substring(0, 8)}... from ${senderPub?.substring(0, 8)}... in group ${groupName} (${groupId?.substring(0, 8)}...)`
+      `🔔 Group message notification: ${messageId?.substring(
+        0,
+        8
+      )}... from ${senderPub?.substring(
+        0,
+        8
+      )}... in group ${groupName} (${groupId?.substring(0, 8)}...)`
     );
 
     // Send notification to all group members except sender
-    memberPubs.forEach(memberPub => {
+    memberPubs.forEach((memberPub) => {
       if (memberPub !== senderPub) {
         io.to(`user:${memberPub}`).emit("newGroupMessageNotification", {
           messageId,
@@ -708,7 +740,7 @@ io.on("connection", (socket) => {
           groupName,
           messagePreview,
           timestamp,
-          type: "group_message"
+          type: "group_message",
         });
       }
     });
@@ -716,13 +748,16 @@ io.on("connection", (socket) => {
 
   // Group typing notification
   socket.on("groupTypingNotification", (data) => {
-    const { senderPub, groupId, groupName, isTyping, timestamp, memberPubs } = data;
+    const { senderPub, groupId, groupName, isTyping, timestamp, memberPubs } =
+      data;
     console.log(
-      `⌨️ Group typing notification: ${senderPub?.substring(0, 8)}... is ${isTyping ? "typing" : "stopped typing"} in group ${groupName}`
+      `⌨️ Group typing notification: ${senderPub?.substring(0, 8)}... is ${
+        isTyping ? "typing" : "stopped typing"
+      } in group ${groupName}`
     );
 
     // Send typing indicator to all group members except sender
-    memberPubs.forEach(memberPub => {
+    memberPubs.forEach((memberPub) => {
       if (memberPub !== senderPub) {
         io.to(`user:${memberPub}`).emit("groupTypingNotification", {
           senderPub,
@@ -730,7 +765,7 @@ io.on("connection", (socket) => {
           groupName,
           isTyping,
           timestamp,
-          type: "group_typing"
+          type: "group_typing",
         });
       }
     });
@@ -740,36 +775,43 @@ io.on("connection", (socket) => {
   socket.on("groupMemberAddedNotification", (data) => {
     const { groupId, groupName, newMemberPub, addedByPub, memberPubs } = data;
     console.log(
-      `👥 Group member added: ${newMemberPub?.substring(0, 8)}... to group ${groupName} by ${addedByPub?.substring(0, 8)}...`
+      `👥 Group member added: ${newMemberPub?.substring(
+        0,
+        8
+      )}... to group ${groupName} by ${addedByPub?.substring(0, 8)}...`
     );
 
     // Notify all group members
-    memberPubs.forEach(memberPub => {
+    memberPubs.forEach((memberPub) => {
       io.to(`user:${memberPub}`).emit("groupMemberAddedNotification", {
         groupId,
         groupName,
         newMemberPub,
         addedByPub,
-        type: "group_member_added"
+        type: "group_member_added",
       });
     });
   });
 
   // Group member removed notification
   socket.on("groupMemberRemovedNotification", (data) => {
-    const { groupId, groupName, removedMemberPub, removedByPub, memberPubs } = data;
+    const { groupId, groupName, removedMemberPub, removedByPub, memberPubs } =
+      data;
     console.log(
-      `👥 Group member removed: ${removedMemberPub?.substring(0, 8)}... from group ${groupName} by ${removedByPub?.substring(0, 8)}...`
+      `👥 Group member removed: ${removedMemberPub?.substring(
+        0,
+        8
+      )}... from group ${groupName} by ${removedByPub?.substring(0, 8)}...`
     );
 
     // Notify all group members
-    memberPubs.forEach(memberPub => {
+    memberPubs.forEach((memberPub) => {
       io.to(`user:${memberPub}`).emit("groupMemberRemovedNotification", {
         groupId,
         groupName,
         removedMemberPub,
         removedByPub,
-        type: "group_member_removed"
+        type: "group_member_removed",
       });
     });
   });
@@ -778,9 +820,16 @@ io.on("connection", (socket) => {
 
   // Message notification (when user receives a new message)
   socket.on("messageNotification", (data) => {
-    const { messageId, senderPub, recipientPub, messagePreview, timestamp } = data;
+    const { messageId, senderPub, recipientPub, messagePreview, timestamp } =
+      data;
     console.log(
-      `🔔 Message notification: ${messageId?.substring(0, 8)}... from ${senderPub?.substring(0, 8)}... to ${recipientPub?.substring(0, 8)}...`
+      `🔔 Message notification: ${messageId?.substring(
+        0,
+        8
+      )}... from ${senderPub?.substring(0, 8)}... to ${recipientPub?.substring(
+        0,
+        8
+      )}...`
     );
 
     // Send notification to recipient
@@ -790,7 +839,7 @@ io.on("connection", (socket) => {
       recipientPub,
       messagePreview,
       timestamp,
-      type: "message"
+      type: "message",
     });
   });
 
@@ -798,7 +847,10 @@ io.on("connection", (socket) => {
   socket.on("messageReadNotification", (data) => {
     const { messageId, readerPub, senderPub, timestamp } = data;
     console.log(
-      `✓ Message read notification: ${messageId?.substring(0, 8)}... by ${readerPub?.substring(0, 8)}...`
+      `✓ Message read notification: ${messageId?.substring(
+        0,
+        8
+      )}... by ${readerPub?.substring(0, 8)}...`
     );
 
     // Notify sender that message was read
@@ -806,7 +858,7 @@ io.on("connection", (socket) => {
       messageId,
       readerPub,
       timestamp,
-      type: "read"
+      type: "read",
     });
   });
 });
@@ -978,11 +1030,11 @@ app.get("/api/search/pub/:pubKey", async (req, res) => {
 app.get("/api/users/:username", async (req, res) => {
   try {
     const { username } = req.params;
-    
+
     console.log(`🔍 Checking if username exists: ${username}`);
-    
+
     const userData = usernameIndex.get(username.toLowerCase());
-    
+
     if (userData) {
       return res.json({
         exists: true,
@@ -1011,9 +1063,11 @@ app.get("/api/users/:username", async (req, res) => {
 app.get("/api/users/pub/:pubKey", async (req, res) => {
   try {
     const { pubKey } = req.params;
-    
-    console.log(`🔍 Checking if user exists by pub: ${pubKey.substring(0, 16)}...`);
-    
+
+    console.log(
+      `🔍 Checking if user exists by pub: ${pubKey.substring(0, 16)}...`
+    );
+
     // Search through all users to find one with matching pub
     let foundUser = null;
     for (const [username, userData] of usernameIndex.entries()) {
@@ -1022,7 +1076,7 @@ app.get("/api/users/pub/:pubKey", async (req, res) => {
         break;
       }
     }
-    
+
     if (foundUser) {
       return res.json({
         exists: true,
@@ -1129,7 +1183,9 @@ async function startServer() {
     await syncWithGunDB();
 
     server.listen(PORT, () => {
-      console.log(`🚀 Linda Username Server ${SERVER_VERSION} running on port ${PORT}`);
+      console.log(
+        `🚀 Linda Username Server ${SERVER_VERSION} running on port ${PORT}`
+      );
       console.log(`📊 Username index: ${usernameIndex.size} entries`);
       console.log(`🔌 Socket.IO server ready for real-time notifications`);
       console.log(`🔧 Config:`, CONFIG);
