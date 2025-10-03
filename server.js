@@ -687,6 +687,42 @@ io.on("connection", (socket) => {
       type: "typing"
     });
   });
+
+  // === ADDITIONAL NOTIFICATION EVENTS ===
+
+  // Message notification (when user receives a new message)
+  socket.on("messageNotification", (data) => {
+    const { messageId, senderPub, recipientPub, messagePreview, timestamp } = data;
+    console.log(
+      `🔔 Message notification: ${messageId?.substring(0, 8)}... from ${senderPub?.substring(0, 8)}... to ${recipientPub?.substring(0, 8)}...`
+    );
+
+    // Send notification to recipient
+    io.to(`user:${recipientPub}`).emit("newMessageNotification", {
+      messageId,
+      senderPub,
+      recipientPub,
+      messagePreview,
+      timestamp,
+      type: "message"
+    });
+  });
+
+  // Message read notification
+  socket.on("messageReadNotification", (data) => {
+    const { messageId, readerPub, senderPub, timestamp } = data;
+    console.log(
+      `✓ Message read notification: ${messageId?.substring(0, 8)}... by ${readerPub?.substring(0, 8)}...`
+    );
+
+    // Notify sender that message was read
+    io.to(`user:${senderPub}`).emit("messageReadNotification", {
+      messageId,
+      readerPub,
+      timestamp,
+      type: "read"
+    });
+  });
 });
 
 // Helper function to get online users count
