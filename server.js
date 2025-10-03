@@ -17,6 +17,7 @@ const io = new Server(server, {
   },
 });
 const PORT = process.env.PORT || 8765;
+const SERVER_VERSION = "v1.0.0";
 
 // Middleware
 app.use(helmet());
@@ -743,6 +744,7 @@ function isUserOnline(userPub) {
 app.get("/api/health", (req, res) => {
   res.json({
     status: "healthy",
+    version: SERVER_VERSION,
     timestamp: Date.now(),
     config: CONFIG,
     stats: {
