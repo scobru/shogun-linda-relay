@@ -689,6 +689,91 @@ io.on("connection", (socket) => {
     });
   });
 
+  // === GROUP NOTIFICATION EVENTS ===
+
+  // Group message notification (when user receives a new group message)
+  socket.on("groupMessageNotification", (data) => {
+    const { messageId, senderPub, groupId, groupName, messagePreview, timestamp, memberPubs } = data;
+    console.log(
+      `🔔 Group message notification: ${messageId?.substring(0, 8)}... from ${senderPub?.substring(0, 8)}... in group ${groupName} (${groupId?.substring(0, 8)}...)`
+    );
+
+    // Send notification to all group members except sender
+    memberPubs.forEach(memberPub => {
+      if (memberPub !== senderPub) {
+        io.to(`user:${memberPub}`).emit("newGroupMessageNotification", {
+          messageId,
+          senderPub,
+          groupId,
+          groupName,
+          messagePreview,
+          timestamp,
+          type: "group_message"
+        });
+      }
+    });
+  });
+
+  // Group typing notification
+  socket.on("groupTypingNotification", (data) => {
+    const { senderPub, groupId, groupName, isTyping, timestamp, memberPubs } = data;
+    console.log(
+      `⌨️ Group typing notification: ${senderPub?.substring(0, 8)}... is ${isTyping ? "typing" : "stopped typing"} in group ${groupName}`
+    );
+
+    // Send typing indicator to all group members except sender
+    memberPubs.forEach(memberPub => {
+      if (memberPub !== senderPub) {
+        io.to(`user:${memberPub}`).emit("groupTypingNotification", {
+          senderPub,
+          groupId,
+          groupName,
+          isTyping,
+          timestamp,
+          type: "group_typing"
+        });
+      }
+    });
+  });
+
+  // Group member added notification
+  socket.on("groupMemberAddedNotification", (data) => {
+    const { groupId, groupName, newMemberPub, addedByPub, memberPubs } = data;
+    console.log(
+      `👥 Group member added: ${newMemberPub?.substring(0, 8)}... to group ${groupName} by ${addedByPub?.substring(0, 8)}...`
+    );
+
+    // Notify all group members
+    memberPubs.forEach(memberPub => {
+      io.to(`user:${memberPub}`).emit("groupMemberAddedNotification", {
+        groupId,
+        groupName,
+        newMemberPub,
+        addedByPub,
+        type: "group_member_added"
+      });
+    });
+  });
+
+  // Group member removed notification
+  socket.on("groupMemberRemovedNotification", (data) => {
+    const { groupId, groupName, removedMemberPub, removedByPub, memberPubs } = data;
+    console.log(
+      `👥 Group member removed: ${removedMemberPub?.substring(0, 8)}... from group ${groupName} by ${removedByPub?.substring(0, 8)}...`
+    );
+
+    // Notify all group members
+    memberPubs.forEach(memberPub => {
+      io.to(`user:${memberPub}`).emit("groupMemberRemovedNotification", {
+        groupId,
+        groupName,
+        removedMemberPub,
+        removedByPub,
+        type: "group_member_removed"
+      });
+    });
+  });
+
   // === ADDITIONAL NOTIFICATION EVENTS ===
 
   // Message notification (when user receives a new message)
