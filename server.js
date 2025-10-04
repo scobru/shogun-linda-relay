@@ -95,6 +95,17 @@ const SYNC_COOLDOWN = 10000; // 10 seconds between syncs
 let lastStatsRequest = 0;
 const STATS_COOLDOWN = 5000; // 5 seconds between stats requests
 
+// Protocol statistics cache
+let protocolStatsCache = {
+  totalMessages: 0,
+  totalGroups: 0,
+  totalTokenRooms: 0,
+  totalPublicRooms: 0,
+  totalConversations: 0,
+  totalContacts: 0,
+  lastUpdated: Date.now()
+};
+
 // Fuse.js configuration for fuzzy search
 const fuseOptions = {
   keys: [
@@ -1034,19 +1045,13 @@ app.get("/api/stats/protocol", async (req, res) => {
 
     console.log("📊 Protocol statistics requested");
 
-    // Get statistics from GunDB
-    const stats = await getProtocolStatisticsFromGunDB();
-    
+    // Return cached stats (updated by notifications)
     res.json({
       success: true,
       timestamp: Date.now(),
       stats: {
-        totalMessages: stats.totalMessages,
-        totalGroups: stats.totalGroups,
-        totalTokenRooms: stats.totalTokenRooms,
-        totalPublicRooms: stats.totalPublicRooms,
-        totalConversations: stats.totalConversations,
-        totalContacts: usernameIndex.size, // From our local index
+        ...protocolStatsCache,
+        totalContacts: usernameIndex.size, // Always fresh from our index
         lastUpdated: Date.now()
       }
     });
@@ -1055,6 +1060,50 @@ app.get("/api/stats/protocol", async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to fetch protocol statistics"
+    });
+  }
+});
+
+// Protocol statistics notification endpoint
+app.post("/api/stats/notify", (req, res) => {
+  try {
+    const { type, data, timestamp } = req.body;
+    
+    console.log(`📊 Protocol notification: ${type}`, data ? `(${JSON.stringify(data).substring(0, 100)}...)` : '');
+
+    // Update cached statistics based on notification type
+    switch (type) {
+      case 'message':
+        protocolStatsCache.totalMessages++;
+        break;
+      case 'group':
+        protocolStatsCache.totalGroups++;
+        break;
+      case 'tokenRoom':
+        protocolStatsCache.totalTokenRooms++;
+        break;
+      case 'publicRoom':
+        protocolStatsCache.totalPublicRooms++;
+        break;
+      case 'conversation':
+        protocolStatsCache.totalConversations++;
+        break;
+      default:
+        console.log(`⚠️ Unknown notification type: ${type}`);
+    }
+
+    protocolStatsCache.lastUpdated = Date.now();
+
+    res.json({
+      success: true,
+      message: `Updated ${type} count`,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error("❌ Protocol notification error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to process notification"
     });
   }
 });
