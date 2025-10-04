@@ -142,6 +142,17 @@ async function initDatabase() {
         )
       `);
 
+      // Protocol statistics table
+      db.run(`
+        CREATE TABLE IF NOT EXISTS protocol_stats (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          stat_type TEXT UNIQUE NOT NULL,
+          stat_value INTEGER DEFAULT 0,
+          last_updated INTEGER DEFAULT (strftime('%s', 'now')),
+          created_at INTEGER DEFAULT (strftime('%s', 'now'))
+        )
+      `);
+
       // Add epub column if it doesn't exist (for existing databases)
       db.run(`ALTER TABLE usernames ADD COLUMN epub TEXT`, (err) => {
         if (err) {
@@ -164,10 +175,75 @@ async function initDatabase() {
 
       // Load data into memory
       loadUsernamesFromDB();
+      loadProtocolStatsFromDB();
       console.log("✅ Database initialized");
       resolve();
     });
   });
+}
+
+// ============================================================================
+// PROTOCOL STATISTICS FUNCTIONS
+// ============================================================================
+
+function loadProtocolStatsFromDB() {
+  db.all("SELECT stat_type, stat_value FROM protocol_stats", (err, rows) => {
+    if (err) {
+      console.error("❌ Failed to load protocol stats from DB:", err);
+      return;
+    }
+
+    // Reset cache with default values
+    protocolStatsCache = {
+      totalMessages: 0,
+      totalGroups: 0,
+      totalTokenRooms: 0,
+      totalPublicRooms: 0,
+      totalConversations: 0,
+      totalContacts: 0,
+      lastUpdated: Date.now()
+    };
+
+    // Load values from database
+    rows.forEach((row) => {
+      switch (row.stat_type) {
+        case 'totalMessages':
+          protocolStatsCache.totalMessages = row.stat_value || 0;
+          break;
+        case 'totalGroups':
+          protocolStatsCache.totalGroups = row.stat_value || 0;
+          break;
+        case 'totalTokenRooms':
+          protocolStatsCache.totalTokenRooms = row.stat_value || 0;
+          break;
+        case 'totalPublicRooms':
+          protocolStatsCache.totalPublicRooms = row.stat_value || 0;
+          break;
+        case 'totalConversations':
+          protocolStatsCache.totalConversations = row.stat_value || 0;
+          break;
+      }
+    });
+
+    console.log(`📊 Loaded protocol stats from DB:`, protocolStatsCache);
+  });
+}
+
+function saveProtocolStatToDB(statType, statValue) {
+  db.run(
+    `
+    INSERT OR REPLACE INTO protocol_stats (stat_type, stat_value, last_updated)
+    VALUES (?, ?, ?)
+  `,
+    [statType, statValue, Date.now()],
+    (err) => {
+      if (err) {
+        console.error(`❌ Failed to save ${statType} to DB:`, err);
+      } else {
+        console.log(`✅ Saved ${statType}: ${statValue} to database`);
+      }
+    }
+  );
 }
 
 // ============================================================================
@@ -1183,24 +1259,39 @@ app.post("/api/stats/notify", (req, res) => {
     console.log(`📊 Protocol notification: ${type}`, data ? `(${JSON.stringify(data).substring(0, 100)}...)` : '');
 
     // Update cached statistics based on notification type
+    let statType = null;
     switch (type) {
       case 'message':
         protocolStatsCache.totalMessages++;
+        statType = 'totalMessages';
         break;
       case 'group':
         protocolStatsCache.totalGroups++;
+        statType = 'totalGroups';
         break;
       case 'tokenRoom':
         protocolStatsCache.totalTokenRooms++;
+        statType = 'totalTokenRooms';
         break;
       case 'publicRoom':
         protocolStatsCache.totalPublicRooms++;
+        statType = 'totalPublicRooms';
         break;
       case 'conversation':
         protocolStatsCache.totalConversations++;
+        statType = 'totalConversations';
         break;
       default:
         console.log(`⚠️ Unknown notification type: ${type}`);
+        return res.status(400).json({
+          success: false,
+          error: `Unknown notification type: ${type}`
+        });
+    }
+
+    // Save to database
+    if (statType) {
+      saveProtocolStatToDB(statType, protocolStatsCache[statType]);
     }
 
     protocolStatsCache.lastUpdated = Date.now();
@@ -1510,11 +1601,22 @@ async function startServer() {
 
     await syncWithGunDB();
 
+    // Periodic save of protocol stats to database (every 5 minutes)
+    setInterval(() => {
+      console.log("💾 Periodic save of protocol stats to database");
+      saveProtocolStatToDB('totalMessages', protocolStatsCache.totalMessages);
+      saveProtocolStatToDB('totalGroups', protocolStatsCache.totalGroups);
+      saveProtocolStatToDB('totalTokenRooms', protocolStatsCache.totalTokenRooms);
+      saveProtocolStatToDB('totalPublicRooms', protocolStatsCache.totalPublicRooms);
+      saveProtocolStatToDB('totalConversations', protocolStatsCache.totalConversations);
+    }, 5 * 60 * 1000); // 5 minutes
+
     server.listen(PORT, () => {
       console.log(
         `🚀 Linda Username Server ${SERVER_VERSION} running on port ${PORT}`
       );
       console.log(`📊 Username index: ${usernameIndex.size} entries`);
+      console.log(`📊 Protocol stats: ${JSON.stringify(protocolStatsCache)}`);
       console.log(`🔌 Socket.IO server ready for real-time notifications`);
       console.log(`🔧 Config:`, CONFIG);
     });
@@ -1527,14 +1629,26 @@ async function startServer() {
 // Graceful shutdown
 process.on("SIGINT", () => {
   console.log("🛑 Shutting down username server...");
-  db.close((err) => {
-    if (err) {
-      console.error("❌ Error closing database:", err);
-    } else {
-      console.log("✅ Database connection closed");
-    }
-    process.exit(0);
-  });
+  
+  // Save final protocol stats before shutdown
+  console.log("💾 Saving final protocol stats to database...");
+  saveProtocolStatToDB('totalMessages', protocolStatsCache.totalMessages);
+  saveProtocolStatToDB('totalGroups', protocolStatsCache.totalGroups);
+  saveProtocolStatToDB('totalTokenRooms', protocolStatsCache.totalTokenRooms);
+  saveProtocolStatToDB('totalPublicRooms', protocolStatsCache.totalPublicRooms);
+  saveProtocolStatToDB('totalConversations', protocolStatsCache.totalConversations);
+  
+  // Wait a moment for database writes to complete
+  setTimeout(() => {
+    db.close((err) => {
+      if (err) {
+        console.error("❌ Error closing database:", err);
+      } else {
+        console.log("✅ Database connection closed");
+      }
+      process.exit(0);
+    });
+  }, 1000);
 });
 
 startServer().catch(console.error);
