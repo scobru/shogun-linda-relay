@@ -559,6 +559,9 @@ async function syncWithGunDB() {
 // Track online users
 const onlineUsers = new Map(); // userPub -> socket.id
 
+// Track room presence
+const roomPresence = new Map(); // roomId -> { roomType, users: Set<userPub>, lastSeen: Map<userPub, timestamp> }
+
 io.on("connection", (socket) => {
   console.log(`🔌 Client connected: ${socket.id}`);
 
