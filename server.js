@@ -3,7 +3,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const compression = require("compression");
 const sqlite3 = require("sqlite3").verbose();
-const { ShogunCore } = require("shogun-core");
+const { ShogunCore, Gun } = require("shogun-core");
 const Fuse = require("fuse.js");
 const { Server } = require("socket.io");
 const http = require("http");
@@ -29,6 +29,7 @@ app.use(
   })
 );
 app.use(express.json({ limit: "50mb" }));
+
 
 // SQLite database
 const db = new sqlite3.Database("./linda_optimization.db");
@@ -58,6 +59,7 @@ async function initializeShogunCore() {
       appDescription: "Username tracking for Linda messaging",
       appUrl: "http://localhost:3001",
       gunOptions: {
+        web: server,
         authToken: "shogun2025",
         peers: peers,
         radisk: true,
