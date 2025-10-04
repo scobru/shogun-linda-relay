@@ -89,7 +89,11 @@ let fuseIndex = null;
 
 // Rate limiting for user sync
 let lastSyncTime = 0;
-const SYNC_COOLDOWN = 5000; // 5 seconds between syncs
+const SYNC_COOLDOWN = 10000; // 10 seconds between syncs
+
+// Rate limiting for protocol stats
+let lastStatsRequest = 0;
+const STATS_COOLDOWN = 5000; // 5 seconds between stats requests
 
 // Fuse.js configuration for fuzzy search
 const fuseOptions = {
