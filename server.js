@@ -1020,6 +1020,18 @@ app.get("/api/health", (req, res) => {
 // Protocol statistics endpoint
 app.get("/api/stats/protocol", async (req, res) => {
   try {
+    // Rate limiting for stats requests
+    const now = Date.now();
+    if (now - lastStatsRequest < STATS_COOLDOWN) {
+      console.log("⏰ Rate limiting stats request");
+      return res.status(429).json({
+        success: false,
+        error: "Too many requests, please wait",
+        retryAfter: Math.ceil((STATS_COOLDOWN - (now - lastStatsRequest)) / 1000)
+      });
+    }
+    lastStatsRequest = now;
+
     console.log("📊 Protocol statistics requested");
 
     // Get statistics from GunDB
