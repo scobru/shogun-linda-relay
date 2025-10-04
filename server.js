@@ -19,6 +19,8 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 8765;
 const SERVER_VERSION = "v1.0.0";
 
+const gunServer = Gun.serve(app);
+
 // Middleware
 app.use(helmet());
 app.use(compression());
@@ -59,7 +61,7 @@ async function initializeShogunCore() {
       appDescription: "Username tracking for Linda messaging",
       appUrl: "http://localhost:3001",
       gunOptions: {
-        web: server,
+        web: gunServer,
         authToken: "shogun2025",
         peers: peers,
         radisk: true,
