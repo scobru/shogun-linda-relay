@@ -873,6 +873,89 @@ function isUserOnline(userPub) {
   return onlineUsers.has(userPub);
 }
 
+// Get protocol statistics from GunDB
+async function getProtocolStatisticsFromGunDB() {
+  return new Promise((resolve) => {
+    let totalMessages = 0;
+    let totalGroups = 0;
+    let totalTokenRooms = 0;
+    let totalPublicRooms = 0;
+    let totalConversations = 0;
+    let completed = 0;
+    const totalChecks = 5;
+
+    const checkComplete = () => {
+      completed++;
+      if (completed >= totalChecks) {
+        resolve({
+          totalMessages,
+          totalGroups,
+          totalTokenRooms,
+          totalPublicRooms,
+          totalConversations
+        });
+      }
+    };
+
+    // Count messages from conversations
+    gun.get("conversations").map().once((conversationData, conversationId) => {
+      if (conversationData && conversationData.messages) {
+        totalMessages += Object.keys(conversationData.messages).length;
+      }
+      if (conversationId) {
+        totalConversations++;
+      }
+      checkComplete();
+    });
+
+    // Count groups
+    gun.get("groups").map().once((groupData, groupId) => {
+      if (groupId) {
+        totalGroups++;
+      }
+      checkComplete();
+    });
+
+    // Count token rooms
+    gun.get("tokenRooms").map().once((roomData, roomId) => {
+      if (roomId) {
+        totalTokenRooms++;
+      }
+      checkComplete();
+    });
+
+    // Count public rooms
+    gun.get("publicRooms").map().once((roomData, roomId) => {
+      if (roomId) {
+        totalPublicRooms++;
+      }
+      checkComplete();
+    });
+
+    // Count conversations (alternative path)
+    gun.get("users").map().once((userData, userId) => {
+      if (userData && userData.conversations) {
+        totalConversations += Object.keys(userData.conversations).length;
+      }
+      checkComplete();
+    });
+
+    // Timeout fallback
+    setTimeout(() => {
+      if (completed < totalChecks) {
+        console.log("⚠️ Protocol stats timeout, returning partial data");
+        resolve({
+          totalMessages,
+          totalGroups,
+          totalTokenRooms,
+          totalPublicRooms,
+          totalConversations
+        });
+      }
+    }, 5000);
+  });
+}
+
 // ============================================================================
 // API ROUTES
 // ============================================================================
@@ -889,6 +972,36 @@ app.get("/api/health", (req, res) => {
       onlineUsers: getOnlineUsersCount(),
     },
   });
+});
+
+// Protocol statistics endpoint
+app.get("/api/stats/protocol", async (req, res) => {
+  try {
+    console.log("📊 Protocol statistics requested");
+
+    // Get statistics from GunDB
+    const stats = await getProtocolStatisticsFromGunDB();
+    
+    res.json({
+      success: true,
+      timestamp: Date.now(),
+      stats: {
+        totalMessages: stats.totalMessages,
+        totalGroups: stats.totalGroups,
+        totalTokenRooms: stats.totalTokenRooms,
+        totalPublicRooms: stats.totalPublicRooms,
+        totalConversations: stats.totalConversations,
+        totalContacts: usernameIndex.size, // From our local index
+        lastUpdated: Date.now()
+      }
+    });
+  } catch (error) {
+    console.error("❌ Protocol stats error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch protocol statistics"
+    });
+  }
 });
 
 // Get online status for specific user
