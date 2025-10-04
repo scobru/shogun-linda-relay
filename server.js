@@ -87,6 +87,10 @@ const CONFIG = {
 let usernameIndex = new Map();
 let fuseIndex = null;
 
+// Rate limiting for user sync
+let lastSyncTime = 0;
+const SYNC_COOLDOWN = 5000; // 5 seconds between syncs
+
 // Fuse.js configuration for fuzzy search
 const fuseOptions = {
   keys: [
@@ -198,6 +202,14 @@ function saveUsernameToDB(usernameData) {
 }
 
 async function addUsernameToIndex(userData) {
+  const now = Date.now();
+  
+  // Rate limiting: don't sync too frequently
+  if (now - lastSyncTime < SYNC_COOLDOWN) {
+    return;
+  }
+  lastSyncTime = now;
+
   const key = userData.username.toLowerCase();
   const existing = usernameIndex.get(key);
 
@@ -226,43 +238,70 @@ async function syncWithGunDB() {
 
   try {
     // Listen for username mappings (usernames/username -> userPub)
+    // Only sync users who are actively using the app (recent activity)
     gun
       .get("usernames")
       .map()
       .on(async (userPub, username) => {
         if (userPub && username) {
-          console.log(
-            `📝 Username mapping detected: ${username} -> ${userPub.substring(
-              0,
-              16
-            )}...`
-          );
-
-          // Try to get the epub for this user
-          let epub = null;
+          // Check if this user has recent activity (last 24 hours)
           try {
-            epub = await new Promise((resolve) => {
-              const timeout = setTimeout(() => resolve(null), 3000);
+            const userData = await new Promise((resolve) => {
+              const timeout = setTimeout(() => resolve(null), 2000);
               gun
                 .get(userPub)
-                .get("epub")
                 .once((data) => {
                   clearTimeout(timeout);
                   resolve(data || null);
                 });
             });
-          } catch (error) {
-            console.log("⚠️ Could not fetch epub for user:", username);
-          }
 
-          addUsernameToIndex({
-            userId: userPub,
-            username: username,
-            displayName: username,
-            userPub: userPub,
-            epub: epub,
-            lastSeen: Date.now(),
-          });
+            if (userData && userData.lastSeen) {
+              const lastSeen = userData.lastSeen;
+              const now = Date.now();
+              const dayInMs = 24 * 60 * 60 * 1000;
+              
+              // Only sync users with activity in the last 24 hours
+              if (now - lastSeen < dayInMs) {
+                console.log(
+                  `📝 Active user detected: ${username} -> ${userPub.substring(
+                    0,
+                    16
+                  )}...`
+                );
+
+                // Try to get the epub for this user
+                let epub = null;
+                try {
+                  epub = await new Promise((resolve) => {
+                    const timeout = setTimeout(() => resolve(null), 3000);
+                    gun
+                      .get(userPub)
+                      .get("epub")
+                      .once((data) => {
+                        clearTimeout(timeout);
+                        resolve(data || null);
+                      });
+                  });
+                } catch (error) {
+                  console.log("⚠️ Could not fetch epub for user:", username);
+                }
+
+                addUsernameToIndex({
+                  userId: userPub,
+                  username: username,
+                  displayName: username,
+                  userPub: userPub,
+                  epub: epub,
+                  lastSeen: Date.now(),
+                });
+              } else {
+                console.log(`⏰ Skipping inactive user: ${username} (last seen: ${new Date(lastSeen).toISOString()})`);
+              }
+            }
+          } catch (error) {
+            console.log("⚠️ Could not check user activity:", username);
+          }
         }
       });
 
