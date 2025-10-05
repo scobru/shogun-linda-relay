@@ -91,13 +91,6 @@ const CONFIG = {
 let usernameIndex = new Map();
 let fuseIndex = null;
 
-// Rate limiting for user sync
-let lastSyncTime = 0;
-const SYNC_COOLDOWN = 10000; // 10 seconds between syncs
-
-// Rate limiting for protocol stats
-let lastStatsRequest = 0;
-const STATS_COOLDOWN = 5000; // 5 seconds between stats requests
 
 // Protocol statistics cache
 let protocolStatsCache = {
@@ -297,13 +290,6 @@ function saveUsernameToDB(usernameData) {
 }
 
 async function addUsernameToIndex(userData) {
-  const now = Date.now();
-  
-  // Rate limiting: don't sync too frequently
-  if (now - lastSyncTime < SYNC_COOLDOWN) {
-    return;
-  }
-  lastSyncTime = now;
 
   const key = userData.username.toLowerCase();
   const existing = usernameIndex.get(key);
@@ -1218,18 +1204,6 @@ app.get("/api/health", (req, res) => {
 // Protocol statistics endpoint
 app.get("/api/stats/protocol", async (req, res) => {
   try {
-    // Rate limiting for stats requests
-    const now = Date.now();
-    if (now - lastStatsRequest < STATS_COOLDOWN) {
-      console.log("⏰ Rate limiting stats request");
-      return res.status(429).json({
-        success: false,
-        error: "Too many requests, please wait",
-        retryAfter: Math.ceil((STATS_COOLDOWN - (now - lastStatsRequest)) / 1000)
-      });
-    }
-    lastStatsRequest = now;
-
     console.log("📊 Protocol statistics requested");
 
     // Return cached stats (updated by notifications)
