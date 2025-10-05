@@ -91,6 +91,13 @@ const CONFIG = {
 let usernameIndex = new Map();
 let fuseIndex = null;
 
+// Rate limiting for user sync
+let lastSyncTime = 0;
+const SYNC_COOLDOWN = 10000; // 10 seconds between syncs
+
+// Rate limiting for protocol stats
+let lastStatsRequest = 0;
+const STATS_COOLDOWN = 5000; // 5 seconds between stats requests
 
 // Protocol statistics cache
 let protocolStatsCache = {
@@ -290,6 +297,13 @@ function saveUsernameToDB(usernameData) {
 }
 
 async function addUsernameToIndex(userData) {
+  const now = Date.now();
+  
+  // Rate limiting: don't sync too frequently
+  if (now - lastSyncTime < SYNC_COOLDOWN) {
+    return;
+  }
+  lastSyncTime = now;
 
   const key = userData.username.toLowerCase();
   const existing = usernameIndex.get(key);
@@ -768,21 +782,13 @@ io.on("connection", (socket) => {
 
   // === EPHEMERAL EVENTS ===
 
-  // Typing indicator
+  // Typing indicator - DEPRECATED: Now handled P2P via GunDB
   socket.on("typing", (data) => {
-    const { senderPub, recipientPub, isTyping } = data;
-    console.log(
-      `⌨️ ${senderPub?.substring(0, 8)}... is ${
-        isTyping ? "typing" : "stopped typing"
-      } to ${recipientPub?.substring(0, 8)}...`
-    );
-
-    // Send only to recipient
-    io.to(`user:${recipientPub}`).emit("userTyping", {
-      senderPub,
-      recipientPub,
-      isTyping,
-    });
+    // Typing notifications are now handled directly between peers via GunDB
+    // This event is kept for backward compatibility but does nothing
+    if (process.env.NODE_ENV === 'development') {
+      console.log('⚠️ Typing event received but ignored - use P2P TypingManager instead');
+    }
   });
 
   // Message read receipt
@@ -915,23 +921,13 @@ io.on("connection", (socket) => {
     });
   });
 
-  // Typing notification
+  // Typing notification - DEPRECATED: Now handled P2P via GunDB
   socket.on("typingNotification", (data) => {
-    const { senderPub, recipientPub, isTyping, timestamp } = data;
-    console.log(
-      `⌨️ Typing notification: ${senderPub?.substring(0, 8)}... is ${
-        isTyping ? "typing" : "stopped typing"
-      } to ${recipientPub?.substring(0, 8)}...`
-    );
-
-    // Send typing indicator to recipient
-    io.to(`user:${recipientPub}`).emit("typingNotification", {
-      senderPub,
-      recipientPub,
-      isTyping,
-      timestamp,
-      type: "typing",
-    });
+    // Typing notifications are now handled directly between peers via GunDB
+    // This event is kept for backward compatibility but does nothing
+    if (process.env.NODE_ENV === 'development') {
+      console.log('⚠️ Typing notification received but ignored - use P2P TypingManager instead');
+    }
   });
 
   // === GROUP NOTIFICATION EVENTS ===
@@ -1204,6 +1200,18 @@ app.get("/api/health", (req, res) => {
 // Protocol statistics endpoint
 app.get("/api/stats/protocol", async (req, res) => {
   try {
+    // Rate limiting for stats requests
+    const now = Date.now();
+    if (now - lastStatsRequest < STATS_COOLDOWN) {
+      console.log("⏰ Rate limiting stats request");
+      return res.status(429).json({
+        success: false,
+        error: "Too many requests, please wait",
+        retryAfter: Math.ceil((STATS_COOLDOWN - (now - lastStatsRequest)) / 1000)
+      });
+    }
+    lastStatsRequest = now;
+
     console.log("📊 Protocol statistics requested");
 
     // Return cached stats (updated by notifications)
