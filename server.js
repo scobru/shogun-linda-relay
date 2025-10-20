@@ -7,6 +7,7 @@ const { ShogunCore, Gun } = require("shogun-core");
 const Fuse = require("fuse.js");
 const { Server } = require("socket.io");
 const http = require("http");
+const Relays = require("shogun-relays");
 
 const app = express();
 const server = http.createServer(app);
@@ -45,16 +46,14 @@ async function initializeShogunCore() {
   try {
     console.log("🔧 Initializing Shogun Core for server...");
 
+    const relays = await Relays.forceListUpdate()
+
+    console.log("🔧 Relays:", relays);
+
     // Same peers and config as client
     const peers = process.env.GUNDB_PEERS
       ? process.env.GUNDB_PEERS.split(",")
-      : [
-          "https://peer.wallie.io/gun",
-          "https://v5g5jseqhgkp43lppgregcfbvi.srv.us/gun",
-          "https://relay.shogun-eco.xyz/gun",
-          "https://gun.defucc.me/gun",
-          "https://a.talkflow.team/gun",
-        ];
+      : relays
 
     core = new ShogunCore({
       appName: "Linda Username Server",
@@ -66,7 +65,15 @@ async function initializeShogunCore() {
         peers: peers,
         radisk: true,
         localStorage: false,
-        ws: true,
+        wire:true,
+        axe:true,
+        ws: {
+          path: "/gun",
+          port: 8765,
+          host: "localhost",
+          secure: false,
+          ws: true,
+        },
       },
     });
 

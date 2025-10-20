@@ -1,7 +1,7 @@
 {
   "name": "linda-optimization-server",
   "version": "1.0.0",
-  "description": "Server unificato per ottimizzazioni Linda: username index e message cache",
+  "description": "Linda Optimization Server",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -20,10 +20,10 @@
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "fuse.js": "^6.6.2",
-    "gun": "^0.2020.1235",
     "helmet": "^7.0.0",
     "node-cron": "^3.0.2",
-    "shogun-core": "^3.1.0",
+    "shogun-core": "^4.0.9",
+    "shogun-relays": "^1.0.4",
     "socket.io": "^4.7.4",
     "sqlite3": "^5.1.6"
   },
