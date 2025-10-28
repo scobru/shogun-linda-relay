@@ -22,7 +22,7 @@
     "fuse.js": "^6.6.2",
     "helmet": "^7.0.0",
     "node-cron": "^3.0.2",
-    "shogun-core": "^4.0.9",
+    "gun": "git+https://github.com/amark/gun.git",
     "shogun-relays": "^1.0.4",
     "socket.io": "^4.7.4",
     "sqlite3": "^5.1.6"

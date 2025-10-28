@@ -3,7 +3,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const compression = require("compression");
 const sqlite3 = require("sqlite3").verbose();
-const { ShogunCore, Gun } = require("shogun-core");
+const Gun = require("gun");
 const Fuse = require("fuse.js");
 const { Server } = require("socket.io");
 const http = require("http");
@@ -17,7 +17,7 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
   },
 });
-const PORT = process.env.PORT || 8766
+const PORT = process.env.PORT || 8766;
 const SERVER_VERSION = "v1.0.0";
 
 const gunServer = Gun.serve(app);
@@ -33,51 +33,35 @@ app.use(
 );
 app.use(express.json({ limit: "50mb" }));
 
-
 // SQLite database
 const db = new sqlite3.Database("./linda_optimization.db");
 
 // Shogun Core connection (same as client)
 let gun = null;
-let core = null;
 
 // Initialize Shogun Core with same config as client
-async function initializeShogunCore() {
+async function initializeGun() {
   try {
     console.log("🔧 Initializing Shogun Core for server...");
 
-    const relays = await Relays.forceListUpdate()
+    const relays = await Relays.forceListUpdate();
 
     console.log("🔧 Relays:", relays);
 
     // Same peers and config as client
     const peers = process.env.GUNDB_PEERS
       ? process.env.GUNDB_PEERS.split(",")
-      : relays
+      : relays;
 
-    core = new ShogunCore({
-      appName: "Linda Username Server",
-      appDescription: "Username tracking for Linda messaging",
-      appUrl: "http://localhost:3001",
-      gunOptions: {
-        web: gunServer,
-        authToken: "shogun2025",
-        peers: peers,
-        radisk: true,
-        localStorage: false,
-        wire:true,
-        axe:true,
-        ws: {
-          path: "/gun",
-          port: 8765,
-          host: "localhost",
-          secure: false,
-          ws: true,
-        },
-      },
+    gun = Gun({
+      web: gunServer,
+      peers: peers,
+      radisk: true,
+      file: "linda-data",
+      localStorage: false,
+      wire: true,
+      axe: true,
     });
-
-    gun = core.gun;
 
     console.log("✅ Shogun Core initialized for server with peers:", peers);
     return true;
@@ -114,7 +98,7 @@ let protocolStatsCache = {
   totalPublicRooms: 0,
   totalConversations: 0,
   totalContacts: 0,
-  lastUpdated: Date.now()
+  lastUpdated: Date.now(),
 };
 
 // Fuse.js configuration for fuzzy search
@@ -208,25 +192,25 @@ function loadProtocolStatsFromDB() {
       totalPublicRooms: 0,
       totalConversations: 0,
       totalContacts: 0,
-      lastUpdated: Date.now()
+      lastUpdated: Date.now(),
     };
 
     // Load values from database
     rows.forEach((row) => {
       switch (row.stat_type) {
-        case 'totalMessages':
+        case "totalMessages":
           protocolStatsCache.totalMessages = row.stat_value || 0;
           break;
-        case 'totalGroups':
+        case "totalGroups":
           protocolStatsCache.totalGroups = row.stat_value || 0;
           break;
-        case 'totalTokenRooms':
+        case "totalTokenRooms":
           protocolStatsCache.totalTokenRooms = row.stat_value || 0;
           break;
-        case 'totalPublicRooms':
+        case "totalPublicRooms":
           protocolStatsCache.totalPublicRooms = row.stat_value || 0;
           break;
-        case 'totalConversations':
+        case "totalConversations":
           protocolStatsCache.totalConversations = row.stat_value || 0;
           break;
       }
@@ -305,7 +289,7 @@ function saveUsernameToDB(usernameData) {
 
 async function addUsernameToIndex(userData) {
   const now = Date.now();
-  
+
   // Rate limiting: don't sync too frequently
   if (now - lastSyncTime < SYNC_COOLDOWN) {
     return;
@@ -350,19 +334,17 @@ async function syncWithGunDB() {
           try {
             const userData = await new Promise((resolve) => {
               const timeout = setTimeout(() => resolve(null), 2000);
-              gun
-                .get(userPub)
-                .once((data) => {
-                  clearTimeout(timeout);
-                  resolve(data || null);
-                });
+              gun.get(userPub).once((data) => {
+                clearTimeout(timeout);
+                resolve(data || null);
+              });
             });
 
             if (userData && userData.lastSeen) {
               const lastSeen = userData.lastSeen;
               const now = Date.now();
               const dayInMs = 24 * 60 * 60 * 1000;
-              
+
               // Only sync users with activity in the last 24 hours
               if (now - lastSeen < dayInMs) {
                 console.log(
@@ -398,7 +380,11 @@ async function syncWithGunDB() {
                   lastSeen: Date.now(),
                 });
               } else {
-                console.log(`⏰ Skipping inactive user: ${username} (last seen: ${new Date(lastSeen).toISOString()})`);
+                console.log(
+                  `⏰ Skipping inactive user: ${username} (last seen: ${new Date(
+                    lastSeen
+                  ).toISOString()})`
+                );
               }
             }
           } catch (error) {
@@ -668,31 +654,36 @@ io.on("connection", (socket) => {
     const { roomId, roomType, userPub } = data;
     if (!roomId || !roomType || !userPub) return;
 
-    console.log(`🏠 User joined room: ${userPub?.substring(0, 8)}... -> ${roomId} (${roomType})`);
-    
+    console.log(
+      `🏠 User joined room: ${userPub?.substring(
+        0,
+        8
+      )}... -> ${roomId} (${roomType})`
+    );
+
     // Join socket room for targeted notifications
     socket.join(`room:${roomId}`);
-    
+
     // Update room presence tracking
     if (!roomPresence.has(roomId)) {
       roomPresence.set(roomId, {
         roomType,
         users: new Set(),
-        lastSeen: new Map()
+        lastSeen: new Map(),
       });
     }
-    
+
     const room = roomPresence.get(roomId);
     room.users.add(userPub);
     room.lastSeen.set(userPub, Date.now());
-    
+
     // Notify room members of new presence
     socket.to(`room:${roomId}`).emit("roomPresence", {
       roomId,
       roomType,
       userPubs: Array.from(room.users),
       onlineCount: room.users.size,
-      lastSeen: Object.fromEntries(room.lastSeen)
+      lastSeen: Object.fromEntries(room.lastSeen),
     });
   });
 
@@ -701,24 +692,26 @@ io.on("connection", (socket) => {
     const { roomId, userPub } = data;
     if (!roomId || !userPub) return;
 
-    console.log(`🏠 User left room: ${userPub?.substring(0, 8)}... -> ${roomId}`);
-    
+    console.log(
+      `🏠 User left room: ${userPub?.substring(0, 8)}... -> ${roomId}`
+    );
+
     // Leave socket room
     socket.leave(`room:${roomId}`);
-    
+
     // Update room presence tracking
     const room = roomPresence.get(roomId);
     if (room) {
       room.users.delete(userPub);
       room.lastSeen.set(userPub, Date.now()); // Update last seen time
-      
+
       // Notify room members of presence change
       socket.to(`room:${roomId}`).emit("roomPresence", {
         roomId,
         roomType: room.roomType,
         userPubs: Array.from(room.users),
         onlineCount: room.users.size,
-        lastSeen: Object.fromEntries(room.lastSeen)
+        lastSeen: Object.fromEntries(room.lastSeen),
       });
     }
   });
@@ -728,24 +721,29 @@ io.on("connection", (socket) => {
     const { roomId, roomType, userPub, status } = data;
     if (!roomId || !userPub) return;
 
-    console.log(`🏠 Room presence update: ${userPub?.substring(0, 8)}... -> ${roomId} (${status})`);
-    
+    console.log(
+      `🏠 Room presence update: ${userPub?.substring(
+        0,
+        8
+      )}... -> ${roomId} (${status})`
+    );
+
     const room = roomPresence.get(roomId);
     if (room) {
-      if (status === 'online') {
+      if (status === "online") {
         room.users.add(userPub);
-      } else if (status === 'offline') {
+      } else if (status === "offline") {
         room.users.delete(userPub);
       }
       room.lastSeen.set(userPub, Date.now());
-      
+
       // Notify room members
       socket.to(`room:${roomId}`).emit("roomPresence", {
         roomId,
         roomType: room.roomType,
         userPubs: Array.from(room.users),
         onlineCount: room.users.size,
-        lastSeen: Object.fromEntries(room.lastSeen)
+        lastSeen: Object.fromEntries(room.lastSeen),
       });
     }
   });
@@ -764,14 +762,14 @@ io.on("connection", (socket) => {
           if (room.users.has(userPub)) {
             room.users.delete(userPub);
             room.lastSeen.set(userPub, Date.now());
-            
+
             // Notify room members of presence change
             socket.to(`room:${roomId}`).emit("roomPresence", {
               roomId,
               roomType: room.roomType,
               userPubs: Array.from(room.users),
               onlineCount: room.users.size,
-              lastSeen: Object.fromEntries(room.lastSeen)
+              lastSeen: Object.fromEntries(room.lastSeen),
             });
           }
         }
@@ -793,8 +791,10 @@ io.on("connection", (socket) => {
   socket.on("typing", (data) => {
     // Typing notifications are now handled directly between peers via GunDB
     // This event is kept for backward compatibility but does nothing
-    if (process.env.NODE_ENV === 'development') {
-      console.log('⚠️ Typing event received but ignored - use P2P TypingManager instead');
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "⚠️ Typing event received but ignored - use P2P TypingManager instead"
+      );
     }
   });
 
@@ -932,8 +932,10 @@ io.on("connection", (socket) => {
   socket.on("typingNotification", (data) => {
     // Typing notifications are now handled directly between peers via GunDB
     // This event is kept for backward compatibility but does nothing
-    if (process.env.NODE_ENV === 'development') {
-      console.log('⚠️ Typing notification received but ignored - use P2P TypingManager instead');
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "⚠️ Typing notification received but ignored - use P2P TypingManager instead"
+      );
     }
   });
 
@@ -1122,53 +1124,68 @@ async function getProtocolStatisticsFromGunDB() {
           totalGroups,
           totalTokenRooms,
           totalPublicRooms,
-          totalConversations
+          totalConversations,
         });
       }
     };
 
     // Count messages from conversations
-    gun.get("conversations").map().once((conversationData, conversationId) => {
-      if (conversationData && conversationData.messages) {
-        totalMessages += Object.keys(conversationData.messages).length;
-      }
-      if (conversationId) {
-        totalConversations++;
-      }
-      checkComplete();
-    });
+    gun
+      .get("conversations")
+      .map()
+      .once((conversationData, conversationId) => {
+        if (conversationData && conversationData.messages) {
+          totalMessages += Object.keys(conversationData.messages).length;
+        }
+        if (conversationId) {
+          totalConversations++;
+        }
+        checkComplete();
+      });
 
     // Count groups
-    gun.get("groups").map().once((groupData, groupId) => {
-      if (groupId) {
-        totalGroups++;
-      }
-      checkComplete();
-    });
+    gun
+      .get("groups")
+      .map()
+      .once((groupData, groupId) => {
+        if (groupId) {
+          totalGroups++;
+        }
+        checkComplete();
+      });
 
     // Count token rooms
-    gun.get("tokenRooms").map().once((roomData, roomId) => {
-      if (roomId) {
-        totalTokenRooms++;
-      }
-      checkComplete();
-    });
+    gun
+      .get("tokenRooms")
+      .map()
+      .once((roomData, roomId) => {
+        if (roomId) {
+          totalTokenRooms++;
+        }
+        checkComplete();
+      });
 
     // Count public rooms
-    gun.get("publicRooms").map().once((roomData, roomId) => {
-      if (roomId) {
-        totalPublicRooms++;
-      }
-      checkComplete();
-    });
+    gun
+      .get("publicRooms")
+      .map()
+      .once((roomData, roomId) => {
+        if (roomId) {
+          totalPublicRooms++;
+        }
+        checkComplete();
+      });
 
     // Count conversations (alternative path)
-    gun.get("users").map().once((userData, userId) => {
-      if (userData && userData.conversations) {
-        totalConversations += Object.keys(userData.conversations).length;
-      }
-      checkComplete();
-    });
+    gun
+      .get("users")
+      .map()
+      .once((userData, userId) => {
+        if (userData && userData.conversations) {
+          totalConversations += Object.keys(userData.conversations).length;
+        }
+        checkComplete();
+      });
 
     // Timeout fallback
     setTimeout(() => {
@@ -1179,7 +1196,7 @@ async function getProtocolStatisticsFromGunDB() {
           totalGroups,
           totalTokenRooms,
           totalPublicRooms,
-          totalConversations
+          totalConversations,
         });
       }
     }, 5000);
@@ -1214,7 +1231,9 @@ app.get("/api/stats/protocol", async (req, res) => {
       return res.status(429).json({
         success: false,
         error: "Too many requests, please wait",
-        retryAfter: Math.ceil((STATS_COOLDOWN - (now - lastStatsRequest)) / 1000)
+        retryAfter: Math.ceil(
+          (STATS_COOLDOWN - (now - lastStatsRequest)) / 1000
+        ),
       });
     }
     lastStatsRequest = now;
@@ -1228,14 +1247,14 @@ app.get("/api/stats/protocol", async (req, res) => {
       stats: {
         ...protocolStatsCache,
         totalContacts: usernameIndex.size, // Always fresh from our index
-        lastUpdated: Date.now()
-      }
+        lastUpdated: Date.now(),
+      },
     });
   } catch (error) {
     console.error("❌ Protocol stats error:", error);
     res.status(500).json({
       success: false,
-      error: "Failed to fetch protocol statistics"
+      error: "Failed to fetch protocol statistics",
     });
   }
 });
@@ -1244,37 +1263,40 @@ app.get("/api/stats/protocol", async (req, res) => {
 app.post("/api/stats/notify", (req, res) => {
   try {
     const { type, data, timestamp } = req.body;
-    
-    console.log(`📊 Protocol notification: ${type}`, data ? `(${JSON.stringify(data).substring(0, 100)}...)` : '');
+
+    console.log(
+      `📊 Protocol notification: ${type}`,
+      data ? `(${JSON.stringify(data).substring(0, 100)}...)` : ""
+    );
 
     // Update cached statistics based on notification type
     let statType = null;
     switch (type) {
-      case 'message':
+      case "message":
         protocolStatsCache.totalMessages++;
-        statType = 'totalMessages';
+        statType = "totalMessages";
         break;
-      case 'group':
+      case "group":
         protocolStatsCache.totalGroups++;
-        statType = 'totalGroups';
+        statType = "totalGroups";
         break;
-      case 'tokenRoom':
+      case "tokenRoom":
         protocolStatsCache.totalTokenRooms++;
-        statType = 'totalTokenRooms';
+        statType = "totalTokenRooms";
         break;
-      case 'publicRoom':
+      case "publicRoom":
         protocolStatsCache.totalPublicRooms++;
-        statType = 'totalPublicRooms';
+        statType = "totalPublicRooms";
         break;
-      case 'conversation':
+      case "conversation":
         protocolStatsCache.totalConversations++;
-        statType = 'totalConversations';
+        statType = "totalConversations";
         break;
       default:
         console.log(`⚠️ Unknown notification type: ${type}`);
         return res.status(400).json({
           success: false,
-          error: `Unknown notification type: ${type}`
+          error: `Unknown notification type: ${type}`,
         });
     }
 
@@ -1288,13 +1310,13 @@ app.post("/api/stats/notify", (req, res) => {
     res.json({
       success: true,
       message: `Updated ${type} count`,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
   } catch (error) {
     console.error("❌ Protocol notification error:", error);
     res.status(500).json({
       success: false,
-      error: "Failed to process notification"
+      error: "Failed to process notification",
     });
   }
 });
@@ -1582,9 +1604,9 @@ async function startServer() {
     await initDatabase();
 
     // Initialize Shogun Core with same config as client
-    const shogunInitialized = await initializeShogunCore();
-    if (!shogunInitialized) {
-      console.error("❌ Failed to initialize Shogun Core, exiting...");
+    const gunInitialized = await initializeGun();
+    if (!gunInitialized) {
+      console.error("❌ Failed to initialize Gun, exiting...");
       process.exit(1);
     }
 
@@ -1593,11 +1615,20 @@ async function startServer() {
     // Periodic save of protocol stats to database (every 5 minutes)
     setInterval(() => {
       console.log("💾 Periodic save of protocol stats to database");
-      saveProtocolStatToDB('totalMessages', protocolStatsCache.totalMessages);
-      saveProtocolStatToDB('totalGroups', protocolStatsCache.totalGroups);
-      saveProtocolStatToDB('totalTokenRooms', protocolStatsCache.totalTokenRooms);
-      saveProtocolStatToDB('totalPublicRooms', protocolStatsCache.totalPublicRooms);
-      saveProtocolStatToDB('totalConversations', protocolStatsCache.totalConversations);
+      saveProtocolStatToDB("totalMessages", protocolStatsCache.totalMessages);
+      saveProtocolStatToDB("totalGroups", protocolStatsCache.totalGroups);
+      saveProtocolStatToDB(
+        "totalTokenRooms",
+        protocolStatsCache.totalTokenRooms
+      );
+      saveProtocolStatToDB(
+        "totalPublicRooms",
+        protocolStatsCache.totalPublicRooms
+      );
+      saveProtocolStatToDB(
+        "totalConversations",
+        protocolStatsCache.totalConversations
+      );
     }, 5 * 60 * 1000); // 5 minutes
 
     server.listen(PORT, () => {
@@ -1618,15 +1649,18 @@ async function startServer() {
 // Graceful shutdown
 process.on("SIGINT", () => {
   console.log("🛑 Shutting down username server...");
-  
+
   // Save final protocol stats before shutdown
   console.log("💾 Saving final protocol stats to database...");
-  saveProtocolStatToDB('totalMessages', protocolStatsCache.totalMessages);
-  saveProtocolStatToDB('totalGroups', protocolStatsCache.totalGroups);
-  saveProtocolStatToDB('totalTokenRooms', protocolStatsCache.totalTokenRooms);
-  saveProtocolStatToDB('totalPublicRooms', protocolStatsCache.totalPublicRooms);
-  saveProtocolStatToDB('totalConversations', protocolStatsCache.totalConversations);
-  
+  saveProtocolStatToDB("totalMessages", protocolStatsCache.totalMessages);
+  saveProtocolStatToDB("totalGroups", protocolStatsCache.totalGroups);
+  saveProtocolStatToDB("totalTokenRooms", protocolStatsCache.totalTokenRooms);
+  saveProtocolStatToDB("totalPublicRooms", protocolStatsCache.totalPublicRooms);
+  saveProtocolStatToDB(
+    "totalConversations",
+    protocolStatsCache.totalConversations
+  );
+
   // Wait a moment for database writes to complete
   setTimeout(() => {
     db.close((err) => {
