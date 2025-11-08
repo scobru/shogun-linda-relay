@@ -61,6 +61,7 @@ async function initializeGun() {
       localStorage: false,
       wire: true,
       axe: true,
+      ws: true
     });
 
     console.log("✅ Shogun Core initialized for server with peers:", peers);
