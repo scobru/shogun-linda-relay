@@ -1631,7 +1631,7 @@ app.get("/api/search/:username", async (req, res) => {
 app.get("/", async (req, res) => {
   res.send(`
     <div>
-      <h1>Shogun Linda Username Server ${SERVER_VERSION}</h1>
+      <h1>Shogun Linda Relay</h1>
       <p>This server provides username tracking, search functionality, and real-time notifications for Linda messaging.</p>
       <p>Available endpoints:</p>
       <ul>
