@@ -101,6 +101,66 @@ let protocolStatsCache = {
   lastUpdated: Date.now(),
 };
 
+// Notification system
+const NOTIFICATION_TYPES = {
+  CACHE_UPDATED: "cache_updated",
+  STATS_UPDATED: "stats_updated",
+  SYSTEM_ALERT: "system_alert",
+};
+const MAX_NOTIFICATIONS_PER_USER = 100;
+const userNotificationQueues = new Map();
+
+function queueNotificationForUser(userPub, notification) {
+  if (!userPub || !notification) {
+    return;
+  }
+
+  const type = Object.values(NOTIFICATION_TYPES).includes(notification.type)
+    ? notification.type
+    : NOTIFICATION_TYPES.SYSTEM_ALERT;
+
+  const normalizedNotification = {
+    type,
+    data: notification.data !== undefined ? notification.data : {},
+    timestamp:
+      typeof notification.timestamp === "number"
+        ? notification.timestamp
+        : Date.now(),
+  };
+
+  if (!userNotificationQueues.has(userPub)) {
+    userNotificationQueues.set(userPub, []);
+  }
+
+  const queue = userNotificationQueues.get(userPub);
+  queue.push(normalizedNotification);
+
+  if (queue.length > MAX_NOTIFICATIONS_PER_USER) {
+    queue.splice(0, queue.length - MAX_NOTIFICATIONS_PER_USER);
+  }
+}
+
+function getAndClearNotificationsForUser(userPub, limit) {
+  if (!userNotificationQueues.has(userPub)) {
+    return [];
+  }
+
+  const queue = userNotificationQueues.get(userPub);
+  let notifications = [...queue];
+
+  if (
+    typeof limit === "number" &&
+    !Number.isNaN(limit) &&
+    limit > 0 &&
+    notifications.length > limit
+  ) {
+    notifications = notifications.slice(notifications.length - limit);
+  }
+
+  userNotificationQueues.set(userPub, []);
+  return notifications;
+}
+
 // Fuse.js configuration for fuzzy search
 const fuseOptions = {
   keys: [
@@ -1255,6 +1315,142 @@ app.get("/api/stats/protocol", async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to fetch protocol statistics",
+    });
+  }
+});
+
+// User notification endpoint
+app.get("/api/notifications/:userPub", (req, res) => {
+  try {
+    const { userPub } = req.params;
+    if (!userPub) {
+      return res.status(400).json({
+        success: false,
+        error: "userPub is required",
+      });
+    }
+
+    const limitParam = req.query.limit;
+    const parsedLimit = limitParam ? parseInt(limitParam, 10) : undefined;
+    const limit =
+      typeof parsedLimit === "number" && !Number.isNaN(parsedLimit) && parsedLimit > 0
+        ? parsedLimit
+        : undefined;
+
+    const notifications = getAndClearNotificationsForUser(userPub, limit);
+    res.json(notifications);
+  } catch (error) {
+    console.error("❌ Notifications fetch error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch notifications",
+    });
+  }
+});
+
+// Message notification (for cache/stat updates)
+app.post("/api/notify/message", (req, res) => {
+  try {
+    const { userPub, messageData, timestamp } = req.body || {};
+
+    if (!userPub || !messageData) {
+      return res.status(400).json({
+        success: false,
+        error: "userPub and messageData are required",
+      });
+    }
+
+    const eventTimestamp =
+      typeof timestamp === "number" ? timestamp : Date.now();
+
+    queueNotificationForUser(userPub, {
+      type: NOTIFICATION_TYPES.CACHE_UPDATED,
+      data: {
+        event: "message",
+        messageData,
+      },
+      timestamp: eventTimestamp,
+    });
+
+    protocolStatsCache.totalMessages++;
+    protocolStatsCache.lastUpdated = Date.now();
+    saveProtocolStatToDB("totalMessages", protocolStatsCache.totalMessages);
+
+    queueNotificationForUser(userPub, {
+      type: NOTIFICATION_TYPES.STATS_UPDATED,
+      data: {
+        totalMessages: protocolStatsCache.totalMessages,
+        totalConversations: protocolStatsCache.totalConversations,
+        totalContacts: protocolStatsCache.totalContacts,
+        lastUpdated: protocolStatsCache.lastUpdated,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: "Message notification queued",
+      timestamp: eventTimestamp,
+    });
+  } catch (error) {
+    console.error("❌ Message notification error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to queue message notification",
+    });
+  }
+});
+
+// Conversation notification (for cache/stat updates)
+app.post("/api/notify/conversation", (req, res) => {
+  try {
+    const { userPub, conversationData, timestamp } = req.body || {};
+
+    if (!userPub || !conversationData) {
+      return res.status(400).json({
+        success: false,
+        error: "userPub and conversationData are required",
+      });
+    }
+
+    const eventTimestamp =
+      typeof timestamp === "number" ? timestamp : Date.now();
+
+    queueNotificationForUser(userPub, {
+      type: NOTIFICATION_TYPES.CACHE_UPDATED,
+      data: {
+        event: "conversation",
+        conversationData,
+      },
+      timestamp: eventTimestamp,
+    });
+
+    protocolStatsCache.totalConversations++;
+    protocolStatsCache.lastUpdated = Date.now();
+    saveProtocolStatToDB(
+      "totalConversations",
+      protocolStatsCache.totalConversations
+    );
+
+    queueNotificationForUser(userPub, {
+      type: NOTIFICATION_TYPES.STATS_UPDATED,
+      data: {
+        totalMessages: protocolStatsCache.totalMessages,
+        totalConversations: protocolStatsCache.totalConversations,
+        totalContacts: protocolStatsCache.totalContacts,
+        lastUpdated: protocolStatsCache.lastUpdated,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: "Conversation notification queued",
+      timestamp: eventTimestamp,
+    });
+  } catch (error) {
+    console.error("❌ Conversation notification error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to queue conversation notification",
     });
   }
 });
