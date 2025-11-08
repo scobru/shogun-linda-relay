@@ -60,8 +60,7 @@ async function initializeGun() {
       file: "linda-data",
       localStorage: false,
       wire: true,
-      axe: true,
-      ws: true
+      axe: true
     });
 
     console.log("✅ Shogun Core initialized for server with peers:", peers);
