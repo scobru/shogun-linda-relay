@@ -20,7 +20,7 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 8766;
 const SERVER_VERSION = "v1.0.0";
 
-const gunServer = Gun.serve(app);
+app.use(Gun.serve);
 
 // Middleware
 app.use(helmet());
@@ -54,7 +54,7 @@ async function initializeGun() {
       : relays;
 
     gun = Gun({
-      web: gunServer,
+      web: server,
       peers: peers,
       radisk: true,
       file: "linda-data",
