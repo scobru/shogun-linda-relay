@@ -1363,11 +1363,47 @@ app.post("/api/notify/message", (req, res) => {
     const eventTimestamp =
       typeof timestamp === "number" ? timestamp : Date.now();
 
+    const recipientPub =
+      typeof messageData?.recipientPub === "string"
+        ? messageData.recipientPub
+        : null;
+    const senderPub =
+      typeof messageData?.senderPub === "string" ? messageData.senderPub : null;
+    const messageId =
+      typeof messageData?.messageId === "string" ? messageData.messageId : null;
+    const messagePreview =
+      typeof messageData?.messagePreview === "string"
+        ? messageData.messagePreview
+        : null;
+
+    if (recipientPub) {
+      queueNotificationForUser(recipientPub, {
+        type: NOTIFICATION_TYPES.CACHE_UPDATED,
+        data: {
+          event: "message",
+          messageId,
+          senderPub: senderPub || userPub,
+          recipientPub,
+          messagePreview,
+          meta: {
+            contentLength: messageData.contentLength,
+          },
+        },
+        timestamp: eventTimestamp,
+      });
+    }
+
     queueNotificationForUser(userPub, {
       type: NOTIFICATION_TYPES.CACHE_UPDATED,
       data: {
         event: "message",
-        messageData,
+        messageId,
+        senderPub: userPub,
+        recipientPub: recipientPub || senderPub,
+        messagePreview,
+        meta: {
+          contentLength: messageData.contentLength,
+        },
       },
       timestamp: eventTimestamp,
     });
@@ -1415,11 +1451,35 @@ app.post("/api/notify/conversation", (req, res) => {
     const eventTimestamp =
       typeof timestamp === "number" ? timestamp : Date.now();
 
+    const contactPub =
+      typeof conversationData?.contactPub === "string"
+        ? conversationData.contactPub
+        : null;
+    const contactName =
+      typeof conversationData?.contactName === "string"
+        ? conversationData.contactName
+        : null;
+
+    if (contactPub && contactPub !== userPub) {
+      queueNotificationForUser(contactPub, {
+        type: NOTIFICATION_TYPES.CACHE_UPDATED,
+        data: {
+          event: "conversation",
+          initiatorPub: userPub,
+          contactPub,
+          contactName,
+        },
+        timestamp: eventTimestamp,
+      });
+    }
+
     queueNotificationForUser(userPub, {
       type: NOTIFICATION_TYPES.CACHE_UPDATED,
       data: {
         event: "conversation",
-        conversationData,
+        initiatorPub: userPub,
+        contactPub: contactPub || userPub,
+        contactName,
       },
       timestamp: eventTimestamp,
     });
