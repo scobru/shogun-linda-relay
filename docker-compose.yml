@@ -1,0 +1,35 @@
+version: "3.8"
+
+services:
+  linda-relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shogun-linda-relay
+    restart: unless-stopped
+    ports:
+      - "8766:8766"
+    environment:
+      - NODE_ENV=production
+      - PORT=8766
+      # Example: provide a comma-separated list of peers or override via CapRover envs
+      - GUNDB_PEERS=
+    volumes:
+      - linda-data:/app/linda-data
+      - gun-relays:/app/gun-relays
+      - sqlite-db:/app/linda_optimization.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8766/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  linda-data:
+    driver: local
+  gun-relays:
+    driver: local
+  sqlite-db:
+    driver: local
+
