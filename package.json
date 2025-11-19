@@ -23,7 +23,7 @@
     "gun": "^0.2020.1241",
     "helmet": "^7.0.0",
     "node-cron": "^3.0.2",
-    "shogun-relays": "^1.0.7",
+    "shogun-relays": "^1.0.8",
     "socket.io": "^4.7.4",
     "sqlite3": "^5.1.6"
   },
