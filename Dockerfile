@@ -28,10 +28,10 @@ USER node
 
 # Set environment defaults
 ENV NODE_ENV=production \
-    PORT=8766
+    PORT=8765
 
 # Expose HTTP port
-EXPOSE 8766
+EXPOSE 8765
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

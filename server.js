@@ -17,7 +17,7 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
   },
 });
-const PORT = process.env.PORT || 8766;
+const PORT = process.env.PORT || 8765;
 const SERVER_VERSION = "v1.0.0";
 
 app.use(Gun.serve);
