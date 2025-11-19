@@ -8,10 +8,10 @@ services:
     container_name: shogun-linda-relay
     restart: unless-stopped
     ports:
-      - "8766:8766"
+      - "8765:8765"
     environment:
       - NODE_ENV=production
-      - PORT=8766
+      - PORT=8765
       # Example: provide a comma-separated list of peers or override via CapRover envs
       - GUNDB_PEERS=
     volumes:
@@ -19,7 +19,7 @@ services:
       - gun-relays:/app/gun-relays
       - sqlite-db:/app/linda_optimization.db
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8766/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8765/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
